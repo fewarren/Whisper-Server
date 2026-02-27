@@ -167,8 +167,9 @@ async function startTranscription() {
 
     try {
         // Create abort controller for timeout
+        // 2 hour timeout for large files (1 hour audio can take 30-60 minutes to process)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+        const timeoutId = setTimeout(() => controller.abort(), 7200000); // 2 hour timeout
 
         const response = await fetch('/transcribe', {
             method: 'POST',

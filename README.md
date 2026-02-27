@@ -231,6 +231,13 @@ The application uses Flask with **threading enabled** to handle multiple request
 - Ability to serve static files while processing
 - Better user experience with real-time progress updates
 
+### Timeout Settings
+
+The client-side timeout is set to **2 hours** to accommodate large audio files:
+- 1-hour audio files typically take 30-60 minutes to process
+- Timeout can be adjusted in `static/js/app.js` (line 172)
+- Change `7200000` (milliseconds) to desired timeout value
+
 For large files or production use, consider using a production WSGI server like Gunicorn with multiple workers.
 
 ## 🔒 Security Considerations
@@ -256,11 +263,12 @@ For large files or production use, consider using a production WSGI server like 
 - **Storage**: 10GB+ free space
 
 ### Processing Time Estimates
-- **Small files** (< 10MB): 5-30 seconds
-- **Medium files** (10-100MB): 30 seconds - 5 minutes
-- **Large files** (100MB-1GB): 5-30+ minutes
+- **Small files** (< 10MB / ~10 min audio): 5-30 seconds
+- **Medium files** (10-100MB / ~10-60 min audio): 30 seconds - 5 minutes
+- **Large files** (100-500MB / ~1-3 hour audio): 5-30 minutes
+- **Very large files** (500MB-1GB / ~3-6 hour audio): 30-60+ minutes
 
-*Times vary based on hardware, model size, and audio length. GPU acceleration significantly reduces processing time.*
+*Times vary based on hardware, model size, and audio length. GPU acceleration significantly reduces processing time. The client timeout is set to 2 hours to accommodate very large files.*
 
 ## 🔧 Troubleshooting
 
