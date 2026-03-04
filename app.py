@@ -3,6 +3,7 @@ from tempfile import NamedTemporaryFile
 import whisper
 import torch
 import os
+import requests as http_requests
 
 # Initialize device and model
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -13,6 +14,27 @@ print("Model loaded successfully!")
 # Initialize Flask app
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB max file size
+
+# Ollama configuration
+OLLAMA_BASE_URL = "http://localhost:11434"
+LLM_MODEL = "gemma2:9b"
+
+REFORMAT_PROMPT = """You are a professional transcript formatter. Reformat the following raw speech-to-text transcript into a well-structured, readable document.
+
+Rules:
+1. Identify speaker changes based on context clues (topic shifts, question-answer patterns, conversational turns) and assign clear labels: Speaker 1, Speaker 2, etc.
+2. If the transcript appears to be a single speaker (monologue), use "Speaker 1" throughout.
+3. Organize into clear paragraphs at natural topic or speaker transitions.
+4. Keep ALL wording and details exactly as spoken — do not paraphrase, correct grammar, or summarize.
+5. Clean up only repetitive filler words (e.g., "um um um um" becomes "um", "like like like" becomes "like"), but preserve normal speech patterns.
+6. Format each speaker's contribution starting with their label followed by a colon, e.g.:
+   Speaker 1: [their words]
+7. Output ONLY the formatted transcript. Do not add any commentary, explanation, preamble, or closing remarks.
+
+Raw transcript:
+{text}
+
+Formatted transcript:"""
 
 @app.route("/", methods=["GET"])
 def index():
@@ -57,6 +79,53 @@ def transcribe():
     except Exception as e:
         print(f"Transcription error: {str(e)}")
         return jsonify({"error": f"Transcription failed: {str(e)}"}), 500
+
+@app.route("/reformat", methods=["POST"])
+def reformat():
+    """Reformat transcript text using local LLM via Ollama"""
+    data = request.get_json()
+    if not data or "text" not in data:
+        return jsonify({"error": "No text provided"}), 400
+
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "Text is empty"}), 400
+    if len(text) > 500000:
+        return jsonify({"error": "Text too large. Maximum 500,000 characters."}), 400
+
+    try:
+        prompt = REFORMAT_PROMPT.format(text=text)
+        print(f"Sending text ({len(text)} chars) to {LLM_MODEL} for reformatting...")
+        response = http_requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": LLM_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "top_p": 0.9,
+                    "num_predict": 8192,
+                }
+            },
+            timeout=600  # 10 minute timeout for LLM
+        )
+        if response.status_code != 200:
+            return jsonify({"error": f"LLM service error: {response.text}"}), 500
+
+        result = response.json()
+        formatted_text = result.get("response", "").strip()
+        print(f"Reformatting complete. Output: {len(formatted_text)} chars.")
+        return jsonify({"formatted_text": formatted_text})
+
+    except http_requests.exceptions.ConnectionError:
+        return jsonify({"error": "Cannot connect to Ollama. Please ensure Ollama is running (run: ollama serve)."}), 503
+    except http_requests.exceptions.Timeout:
+        return jsonify({"error": "LLM processing timed out. Try with a shorter text."}), 504
+    except Exception as e:
+        print(f"Reformat error: {str(e)}")
+        return jsonify({"error": f"Reformat failed: {str(e)}"}), 500
+
 
 @app.errorhandler(413)
 def request_entity_too_large(error):

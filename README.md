@@ -4,14 +4,16 @@ A production-ready web application that provides a user-friendly interface for O
 
 ## ✨ Features
 
-- **Modern Web Interface**: Clean, responsive UI with drag-and-drop file upload
+- **Modern Web Interface**: Clean, responsive tabbed UI with drag-and-drop file upload
 - **Multiple Audio Formats**: Supports WAV, MP3, M4A, FLAC, OGG, and WebM
 - **Automatic Language Detection**: Detects and displays the spoken language
 - **GPU Acceleration**: Automatically uses CUDA if available for faster transcription
-- **Real-time Progress**: Visual feedback during transcription process
-- **Easy Export**: Copy to clipboard or download transcription as text file
+- **Real-time Progress**: Visual feedback during transcription and reformatting
+- **Easy Export**: Copy to clipboard or download as text file
 - **Error Handling**: Comprehensive validation and user-friendly error messages
-- **Large File Support**: Supports files up to 1GB
+- **Large File Support**: Supports audio files up to 1GB
+- **AI Transcript Reformatter**: Uses a local LLM (via Ollama) to add speaker labels and organize paragraphs
+- **Text File Upload**: Upload any `.txt` transcript file for AI reformatting
 
 ## 🚀 Quick Start
 
@@ -19,6 +21,7 @@ A production-ready web application that provides a user-friendly interface for O
 
 - Python 3.8 or higher
 - pip (Python package manager)
+- [Ollama](https://ollama.com) (for AI transcript reformatting)
 - CUDA-compatible GPU (optional, for faster processing)
 - 4GB+ RAM (8GB+ recommended for large files)
 
@@ -61,9 +64,24 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 python -c "import whisper; print('Whisper installed successfully')"
 ```
 
+6. **Install Ollama** (for AI transcript reformatting)
+
+Follow the instructions at https://ollama.com/download, then pull the default model:
+```bash
+ollama pull gemma2:9b
+```
+
+Any Ollama-compatible model can be used. To change the model, edit `LLM_MODEL` in `app.py`.
+
 ### Running the Application
 
-1. **Start the server:**
+1. **Start Ollama** (in a separate terminal):
+```bash
+ollama serve
+```
+*(Skip this if Ollama is already running as a system service.)*
+
+2. **Start the Flask server:**
 ```bash
 ./venv/bin/python app.py
 ```
@@ -73,12 +91,10 @@ Or if virtual environment is activated:
 python app.py
 ```
 
-2. **Open your web browser and navigate to:**
+3. **Open your web browser and navigate to:**
 ```
 http://localhost:5000
 ```
-
-3. **Upload an audio file and click "Start Transcription"**
 
 The server will display which device it's using (CPU or CUDA) when it starts.
 
@@ -100,25 +116,33 @@ whisper-app/
 
 ## 📖 How to Use
 
-### Step 1: Upload Audio File
+### 🎙️ Tab 1: Transcribe Audio
+
 1. Open http://localhost:5000 in your web browser
-2. Either:
-   - **Drag and drop** an audio file onto the upload area, or
-   - **Click** the upload area to browse and select a file
+2. Either **drag and drop** an audio file or click to browse
 3. Supported formats: WAV, MP3, M4A, FLAC, OGG, WebM (up to 1GB)
+4. Click **"Start Transcription"** and wait for the result
+5. Once complete, you can:
+   - **Copy** the transcription to clipboard
+   - **Download** as a `.txt` file
+   - Click **"Reformat with AI"** to instantly reformat the transcription with speaker labels and paragraphs (result appears below)
 
-### Step 2: Start Transcription
-1. After selecting a file, you'll see the file name and size
-2. Click the **"Start Transcription"** button
-3. Wait while the AI processes your audio (progress indicator will show)
+### ✨ Tab 2: Reformat Text
 
-### Step 3: View and Export Results
-1. Once complete, the transcription text will appear
-2. The detected language will be shown as a badge
-3. You can:
-   - **Copy** the text to clipboard
-   - **Download** as a .txt file
-   - **Start a new transcription** with another file
+Use this tab to reformat any existing transcript (e.g. from a previous Whisper run or any other source):
+
+1. Click the **"✨ Reformat Text"** tab
+2. Either:
+   - **Drag and drop** a `.txt` file onto the upload area, or
+   - **Paste** raw transcript text into the text box
+3. Click **"Reformat with AI"**
+4. Once complete, you can **Copy** or **Download** the formatted result
+
+The AI will:
+- Assign **Speaker 1**, **Speaker 2**, etc. labels based on context
+- Organize text into **clear paragraphs** at topic/speaker transitions
+- **Clean up** repetitive filler words (e.g. "um um um" → "um")
+- **Preserve** all wording and detail exactly as spoken
 
 ## 🎨 User Interface
 
@@ -140,6 +164,31 @@ whisper-app/
 - Copy to clipboard functionality
 - Download as text file option
 - Start new transcription button
+
+## 🤖 AI Reformatter
+
+The reformatter uses [Ollama](https://ollama.com) to run a local LLM. No data leaves your machine.
+
+### Default Model
+`gemma2:9b` — pulled via `ollama pull gemma2:9b`
+
+### Changing the Model
+Edit `LLM_MODEL` in `app.py`:
+```python
+LLM_MODEL = "gemma2:9b"   # default
+# LLM_MODEL = "mistral"   # alternatives
+# LLM_MODEL = "qwen2.5:7b"
+# LLM_MODEL = "llama3.1:8b"
+```
+
+Then restart the server. Pull any new model first with `ollama pull <model>`.
+
+### Processing Time (Reformatter)
+- Short transcripts (< 2,000 words): ~15–30 seconds
+- Medium transcripts (2,000–10,000 words): ~30–90 seconds
+- Long transcripts (10,000+ words): 2–5 minutes
+
+*GPU acceleration applies to Ollama as well — CUDA is used automatically if available.*
 
 ## 🔧 API Endpoints
 
@@ -246,7 +295,8 @@ For large files or production use, consider using a production WSGI server like 
 - File size limits to prevent resource exhaustion
 - Temporary file handling with automatic cleanup
 - Input sanitization and error handling
-- Request timeout protection (5 minutes)
+- Request timeout protection (2 hours for transcription, 11 minutes for reformatting)
+- All AI processing is local — no audio or text is sent to external services
 
 ## 💻 System Requirements
 
@@ -292,6 +342,16 @@ For large files or production use, consider using a production WSGI server like 
 - Check that the file is under 1GB
 - Verify the limits in both `app.py` and `static/js/app.js` match
 - Clear browser cache and reload the page
+
+### "Cannot connect to Ollama" error on Reformat tab
+- Ensure Ollama is installed: https://ollama.com/download
+- Start it manually: `ollama serve`
+- Verify it's running: `curl http://localhost:11434`
+- Pull the model if not already done: `ollama pull gemma2:9b`
+
+### Reformat tab times out
+- Very long transcripts (60,000+ words) may exceed limits
+- Split the text into smaller sections and reformat each separately
 
 ### Transcription fails or returns empty text
 - Verify the audio file is not corrupted
