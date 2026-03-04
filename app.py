@@ -21,23 +21,34 @@ LLM_MODEL = "llama3.1:8b"
 
 # System prompt: hard constraints enforced at the system level
 REFORMAT_SYSTEM = (
-    "You are a transcript formatter. "
-    "Your sole job is to add paragraph breaks and speaker labels to a raw transcript. "
-    "You must reproduce every spoken word exactly as given — no exceptions. "
-    "Never summarize, analyze, interpret, condense, or omit anything. "
-    "Never add headings, bullet points, bold text, commentary, analysis, or any words "
-    "that were not spoken by a participant. "
-    "Output only the reformatted transcript text."
+    "You are a mechanical text formatter, not a writer or analyst. "
+    "You apply three operations to transcript text: insert paragraph breaks, prepend speaker labels, and collapse repeated filler words. "
+    "You do not write any original sentences. "
+    "You do not introduce, describe, summarize, interpret, or comment on the content in any way. "
+    "Every word in your output must come directly from the input transcript — nothing else. "
+    "If you produce any sentence that did not come word-for-word from the input, that is an error."
 )
 
-# User prompt: the formatting task
-REFORMAT_PROMPT = """Format the following raw transcript by applying these three changes only:
+# User prompt: concrete instructions plus a worked example so the model knows exactly what is expected
+REFORMAT_PROMPT = """Apply exactly three mechanical operations to the raw transcript below. Do not write any new sentences.
 
-1. PARAGRAPH BREAKS — insert a blank line at each natural topic shift or speaker change.
-2. SPEAKER LABELS — prefix each speaker's turn with "Speaker 1:", "Speaker 2:", etc., inferred from context (question/answer patterns, topic shifts, conversational turns). Use "Speaker 1:" throughout if only one speaker is present.
-3. FILLER COLLAPSE — reduce runs of the same repeated filler word to one (e.g. "um um um" → "um"). Keep single occurrences.
+OPERATIONS:
+1. PARAGRAPH BREAKS — insert a blank line whenever the speaker changes or the topic clearly shifts.
+2. SPEAKER LABELS — prepend "Speaker 1:", "Speaker 2:", etc. to each speaker's turn, inferred from question/answer patterns or topic shifts. Use "Speaker 1:" throughout if there is only one speaker.
+3. FILLER COLLAPSE — reduce consecutive runs of the same filler word to one (e.g. "um um um" → "um"). Keep single occurrences.
 
-Every word from the original transcript must appear in the output. Do not add, remove, or change any spoken word.
+EXAMPLE
+Input:
+yeah so um um I wanted to talk about the budget right we need to finalize it and Dave what do you think we should do about the timeline because honestly we've been going back and forth on this for weeks
+
+Output:
+Speaker 1: yeah so um I wanted to talk about the budget right we need to finalize it
+
+Speaker 2: and Dave what do you think we should do about the timeline because honestly we've been going back and forth on this for weeks
+
+--- END OF EXAMPLE ---
+
+Begin your output immediately with the first speaker label. Do not write any introductory sentence before the first speaker label.
 
 Raw transcript:
 {text}
