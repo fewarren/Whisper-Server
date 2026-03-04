@@ -19,22 +19,17 @@ app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB max file size
 OLLAMA_BASE_URL = "http://localhost:11434"
 LLM_MODEL = "gemma2:9b"
 
-REFORMAT_PROMPT = """You are a professional transcript formatter. Reformat the following raw speech-to-text transcript into a well-structured, readable document.
+REFORMAT_PROMPT = """Rewrite this transcript as a well-formatted narrative with clear paragraphs. Do not change wording or omit any details. Do not paraphrase, summarize, interpret, or add any content not present in the original.
 
-Rules:
-1. Identify speaker changes based on context clues (topic shifts, question-answer patterns, conversational turns) and assign clear labels: Speaker 1, Speaker 2, etc.
-2. If the transcript appears to be a single speaker (monologue), use "Speaker 1" throughout.
-3. Organize into clear paragraphs at natural topic or speaker transitions.
-4. Keep ALL wording and details exactly as spoken — do not paraphrase, correct grammar, or summarize.
-5. Clean up only repetitive filler words (e.g., "um um um um" becomes "um", "like like like" becomes "like"), but preserve normal speech patterns.
-6. Format each speaker's contribution starting with their label followed by a colon, e.g.:
-   Speaker 1: [their words]
-7. Output ONLY the formatted transcript. Do not add any commentary, explanation, preamble, or closing remarks.
+Additional formatting rules:
+- Where speaker changes can be inferred from context (e.g. question/answer exchanges, topic shifts), prefix each speaker's words with "Speaker 1:", "Speaker 2:", etc. If the transcript is a single speaker, use "Speaker 1:" throughout.
+- Collapse only consecutive repeated filler words (e.g. "um um um" → "um", "so so so" → "so"). Do not remove single occurrences.
+- Output ONLY the reformatted transcript. Do not add headings, commentary, summaries, or closing remarks.
 
-Raw transcript:
+Transcript:
 {text}
 
-Formatted transcript:"""
+Reformatted transcript:"""
 
 @app.route("/", methods=["GET"])
 def index():
@@ -103,7 +98,7 @@ def reformat():
                 "prompt": prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.3,
+                    "temperature": 0.1,
                     "top_p": 0.9,
                     "num_predict": 8192,
                 }
