@@ -55,6 +55,70 @@ Raw transcript:
 
 Reformatted transcript:"""
 
+# Maximum words per chunk — sized to keep total prompt+output within Ollama's 4096-token
+# default context window (system ~100 tok + template ~350 tok + chunk ~800 tok + output ~800 tok ≈ 2050).
+_CHUNK_WORDS = 500
+
+
+def _ollama_reformat(chunk_text: str) -> str:
+    """Send a single chunk to Ollama and return the formatted text."""
+    resp = http_requests.post(
+        f"{OLLAMA_BASE_URL}/api/generate",
+        json={
+            "model": LLM_MODEL,
+            "system": REFORMAT_SYSTEM,
+            "prompt": REFORMAT_PROMPT.format(text=chunk_text),
+            "stream": False,
+            "options": {
+                "temperature": 0.1,
+                "num_predict": -1,   # no output-length cap
+            },
+        },
+        timeout=300,
+    )
+    resp.raise_for_status()
+    return resp.json().get("response", "").strip()
+
+
+def _reformat_text(text: str) -> str:
+    """Reformat transcript, chunking if the text is too long for one LLM call."""
+    words = text.split()
+
+    # Short enough to process in one shot
+    if len(words) <= _CHUNK_WORDS:
+        return _ollama_reformat(text)
+
+    # Split into chunks and track the last speaker label so numbering stays
+    # consistent across chunk boundaries.
+    chunks = [
+        " ".join(words[i: i + _CHUNK_WORDS])
+        for i in range(0, len(words), _CHUNK_WORDS)
+    ]
+
+    parts = []
+    last_speaker = None   # e.g. "Speaker 2"
+
+    for idx, chunk in enumerate(chunks):
+        # Prepend a one-line continuation hint (inside the transcript block so
+        # the model treats it as metadata, not spoken words).
+        if idx > 0 and last_speaker:
+            hint = f"[Continuing — last speaker before this section: {last_speaker}]\n"
+            chunk_input = hint + chunk
+        else:
+            chunk_input = chunk
+
+        result = _ollama_reformat(chunk_input)
+        parts.append(result)
+
+        # Remember the last speaker label seen in this chunk's output
+        for line in reversed(result.splitlines()):
+            stripped = line.strip()
+            if stripped.startswith("Speaker"):
+                last_speaker = stripped.split(":")[0].strip()
+                break
+
+    return "\n\n".join(parts)
+
 @app.route("/", methods=["GET"])
 def index():
     """Serve the main web interface"""
@@ -113,28 +177,11 @@ def reformat():
         return jsonify({"error": "Text too large. Maximum 500,000 characters."}), 400
 
     try:
-        prompt = REFORMAT_PROMPT.format(text=text)
-        print(f"Sending text ({len(text)} chars) to {LLM_MODEL} for reformatting...")
-        response = http_requests.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={
-                "model": LLM_MODEL,
-                "system": REFORMAT_SYSTEM,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.1,
-                    "top_p": 0.9,
-                    "num_predict": -1,   # unlimited — output must match input length
-                }
-            },
-            timeout=600  # 10 minute timeout for LLM
-        )
-        if response.status_code != 200:
-            return jsonify({"error": f"LLM service error: {response.text}"}), 500
-
-        result = response.json()
-        formatted_text = result.get("response", "").strip()
+        word_count = len(text.split())
+        chunk_count = max(1, (word_count + _CHUNK_WORDS - 1) // _CHUNK_WORDS)
+        print(f"Reformatting {len(text)} chars / {word_count} words "
+              f"via {LLM_MODEL} ({chunk_count} chunk(s))...")
+        formatted_text = _reformat_text(text)
         print(f"Reformatting complete. Output: {len(formatted_text)} chars.")
         return jsonify({"formatted_text": formatted_text})
 
