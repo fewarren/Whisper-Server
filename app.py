@@ -19,12 +19,20 @@ app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB max file size
 OLLAMA_BASE_URL = "http://localhost:11434"
 LLM_MODEL = "gemma2:9b"
 
-REFORMAT_PROMPT = """Rewrite this transcript as a well-formatted narrative with clear paragraphs. Do not change wording or omit any details. Do not paraphrase, summarize, interpret, or add any content not present in the original.
+REFORMAT_PROMPT = """You are a transcript formatter. Add structure to the raw transcript below without changing the spoken words.
 
-Additional formatting rules:
-- Where speaker changes can be inferred from context (e.g. question/answer exchanges, topic shifts), prefix each speaker's words with "Speaker 1:", "Speaker 2:", etc. If the transcript is a single speaker, use "Speaker 1:" throughout.
-- Collapse only consecutive repeated filler words (e.g. "um um um" → "um", "so so so" → "so"). Do not remove single occurrences.
-- Output ONLY the reformatted transcript. Do not add headings, commentary, summaries, or closing remarks.
+YOU MUST DO all of the following:
+1. Break the text into paragraphs at natural topic or speaker transitions.
+2. Label each speaker as "Speaker 1:", "Speaker 2:", etc., based on context clues such as question/answer patterns, changes in subject, or conversational turns. If only one speaker is present, label all text "Speaker 1:".
+3. Collapse runs of the same consecutive filler word (e.g. "um um um" → "um", "so so so" → "so"). Preserve single occurrences.
+
+YOU MUST NOT do any of the following:
+- Change, reorder, or rephrase any of the spoken words.
+- Omit any content from the original transcript.
+- Summarize, condense, or interpret the meaning of the text.
+- Add any words, sentences, headings, commentary, or closing remarks that were not spoken.
+
+Output ONLY the reformatted transcript with nothing else before or after it.
 
 Transcript:
 {text}
