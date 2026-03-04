@@ -17,24 +17,29 @@ app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB max file size
 
 # Ollama configuration
 OLLAMA_BASE_URL = "http://localhost:11434"
-LLM_MODEL = "gemma2:9b"
+LLM_MODEL = "llama3.1:8b"
 
-REFORMAT_PROMPT = """You are a transcript formatter. Add structure to the raw transcript below without changing the spoken words.
+# System prompt: hard constraints enforced at the system level
+REFORMAT_SYSTEM = (
+    "You are a transcript formatter. "
+    "Your sole job is to add paragraph breaks and speaker labels to a raw transcript. "
+    "You must reproduce every spoken word exactly as given — no exceptions. "
+    "Never summarize, analyze, interpret, condense, or omit anything. "
+    "Never add headings, bullet points, bold text, commentary, analysis, or any words "
+    "that were not spoken by a participant. "
+    "Output only the reformatted transcript text."
+)
 
-YOU MUST DO all of the following:
-1. Break the text into paragraphs at natural topic or speaker transitions.
-2. Label each speaker as "Speaker 1:", "Speaker 2:", etc., based on context clues such as question/answer patterns, changes in subject, or conversational turns. If only one speaker is present, label all text "Speaker 1:".
-3. Collapse runs of the same consecutive filler word (e.g. "um um um" → "um", "so so so" → "so"). Preserve single occurrences.
+# User prompt: the formatting task
+REFORMAT_PROMPT = """Format the following raw transcript by applying these three changes only:
 
-YOU MUST NOT do any of the following:
-- Change, reorder, or rephrase any of the spoken words.
-- Omit any content from the original transcript.
-- Summarize, condense, or interpret the meaning of the text.
-- Add any words, sentences, headings, commentary, or closing remarks that were not spoken.
+1. PARAGRAPH BREAKS — insert a blank line at each natural topic shift or speaker change.
+2. SPEAKER LABELS — prefix each speaker's turn with "Speaker 1:", "Speaker 2:", etc., inferred from context (question/answer patterns, topic shifts, conversational turns). Use "Speaker 1:" throughout if only one speaker is present.
+3. FILLER COLLAPSE — reduce runs of the same repeated filler word to one (e.g. "um um um" → "um"). Keep single occurrences.
 
-Output ONLY the reformatted transcript with nothing else before or after it.
+Every word from the original transcript must appear in the output. Do not add, remove, or change any spoken word.
 
-Transcript:
+Raw transcript:
 {text}
 
 Reformatted transcript:"""
@@ -103,12 +108,13 @@ def reformat():
             f"{OLLAMA_BASE_URL}/api/generate",
             json={
                 "model": LLM_MODEL,
+                "system": REFORMAT_SYSTEM,
                 "prompt": prompt,
                 "stream": False,
                 "options": {
                     "temperature": 0.1,
                     "top_p": 0.9,
-                    "num_predict": 8192,
+                    "num_predict": -1,   # unlimited — output must match input length
                 }
             },
             timeout=600  # 10 minute timeout for LLM
