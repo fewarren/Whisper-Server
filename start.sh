@@ -51,7 +51,7 @@ fi
 ok "Virtual environment found"
 
 # Required Python packages
-PACKAGES=(flask whisper torch requests)
+PACKAGES=(flask whisper torch requests whisperx)
 ALL_OK=true
 for pkg in "${PACKAGES[@]}"; do
     if "$VENV_PYTHON" -c "import $pkg" 2>/dev/null; then
@@ -64,8 +64,18 @@ done
 
 if [[ "$ALL_OK" != true ]]; then
     echo
-    info "Install missing packages: ${CYAN}./venv/bin/pip install -r requirements.txt${RESET}"
+    info "Install missing packages: ${CYAN}./venv/bin/pip install whisperx${RESET}"
     exit 1
+fi
+
+# Speaker diarization (HF_TOKEN)
+if [[ -n "${HF_TOKEN:-}" ]]; then
+    ok "HF_TOKEN set — speaker diarization enabled"
+else
+    warn "HF_TOKEN not set — speaker diarization will be disabled"
+    info "To enable: export HF_TOKEN='hf_...' then restart"
+    info "Get a token at: ${CYAN}https://huggingface.co/settings/tokens${RESET}"
+    info "Accept model license: ${CYAN}https://huggingface.co/pyannote/speaker-diarization-3.1${RESET}"
 fi
 
 # CUDA availability (warning only — CPU fallback is supported)

@@ -7,9 +7,43 @@ import requests as http_requests
 
 # Initialize device and model
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
+
 print(f"Loading Whisper model on {DEVICE}...")
 model = whisper.load_model("base", device=DEVICE)
 print("Model loaded successfully!")
+
+# WhisperX models — lazy-loaded on first diarization request
+_whisperx_model = None        # faster-whisper transcription model
+_diarization_pipeline = None  # pyannote diarization pipeline
+
+# Hugging Face token required for pyannote speaker diarization
+# Set via:  export HF_TOKEN="hf_..."
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
+
+
+def _load_whisperx_model():
+    """Lazy-load the WhisperX transcription model (faster-whisper)."""
+    global _whisperx_model
+    if _whisperx_model is None:
+        import whisperx
+        print("Loading WhisperX model...")
+        _whisperx_model = whisperx.load_model("base", DEVICE, compute_type=COMPUTE_TYPE)
+        print("WhisperX model loaded.")
+    return _whisperx_model
+
+
+def _load_diarization_pipeline(hf_token: str):
+    """Lazy-load the pyannote diarization pipeline."""
+    global _diarization_pipeline
+    if _diarization_pipeline is None:
+        import whisperx
+        print("Loading diarization pipeline...")
+        _diarization_pipeline = whisperx.DiarizationPipeline(
+            use_auth_token=hf_token, device=DEVICE
+        )
+        print("Diarization pipeline loaded.")
+    return _diarization_pipeline
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -129,9 +163,49 @@ def device_info():
     """Return information about the device being used"""
     return jsonify({"device": DEVICE})
 
+@app.route("/api/diarization-status", methods=["GET"])
+def diarization_status():
+    """Return whether speaker diarization is available (HF_TOKEN set)."""
+    return jsonify({"available": bool(HF_TOKEN)})
+
+
+def _format_diarized_segments(segments) -> str:
+    """Convert WhisperX diarized segments into a readable transcript string."""
+    lines = []
+    current_speaker = None
+    current_words = []
+    current_start = 0.0
+
+    def _ts(secs: float) -> str:
+        h, rem = divmod(int(secs), 3600)
+        m, s = divmod(rem, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+    def _flush():
+        if current_words and current_speaker:
+            lines.append(f"[{_ts(current_start)}] {current_speaker}: {' '.join(current_words)}")
+
+    for seg in segments:
+        speaker = seg.get("speaker", "SPEAKER_??")
+        text = seg.get("text", "").strip()
+        start = seg.get("start", 0.0)
+
+        if speaker != current_speaker:
+            _flush()
+            current_speaker = speaker
+            current_words = [text] if text else []
+            current_start = start
+        else:
+            if text:
+                current_words.append(text)
+
+    _flush()
+    return "\n\n".join(lines)
+
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
-    """Handle audio file transcription"""
+    """Handle audio file transcription, with optional speaker diarization."""
     # Validate file upload
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
@@ -146,18 +220,76 @@ def transcribe():
     if file_ext not in allowed_extensions:
         return jsonify({"error": f"Unsupported file format. Allowed formats: {', '.join(allowed_extensions)}"}), 400
 
-    try:
-        # Save file temporarily and transcribe
-        with NamedTemporaryFile(suffix=file_ext, delete=True) as tmp:
-            f.save(tmp.name)
-            print(f"Transcribing file: {f.filename}")
-            result = model.transcribe(tmp.name)
-            print(f"Transcription complete. Language: {result.get('language')}")
+    # Check if caller wants diarization
+    diarize = request.form.get("diarize", "false").lower() == "true"
 
+    if diarize and not HF_TOKEN:
         return jsonify({
-            "text": result.get("text", "").strip(),
-            "language": result.get("language", "unknown")
-        })
+            "error": (
+                "Speaker diarization requires a Hugging Face token. "
+                "Set the HF_TOKEN environment variable and restart the server. "
+                "Get a free token at https://huggingface.co/settings/tokens "
+                "and accept the pyannote model license at "
+                "https://huggingface.co/pyannote/speaker-diarization-3.1"
+            )
+        }), 503
+
+    try:
+        with NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+            tmp_path = tmp.name
+            f.save(tmp_path)
+
+        try:
+            if diarize:
+                # ── WhisperX path: transcribe + align + diarize ──────────
+                import whisperx
+
+                print(f"WhisperX transcribing: {f.filename}")
+                wx_model = _load_whisperx_model()
+                audio = whisperx.load_audio(tmp_path)
+                wx_result = wx_model.transcribe(audio, batch_size=8)
+                language = wx_result.get("language", "unknown")
+                print(f"WhisperX transcription done. Language: {language}")
+
+                # Align word-level timestamps
+                print("Aligning word timestamps...")
+                align_model, metadata = whisperx.load_align_model(
+                    language_code=language, device=DEVICE
+                )
+                wx_result = whisperx.align(
+                    wx_result["segments"], align_model, metadata, audio, DEVICE,
+                    return_char_alignments=False
+                )
+
+                # Diarize (who spoke when)
+                print("Running speaker diarization...")
+                diarize_pipeline = _load_diarization_pipeline(HF_TOKEN)
+                diarize_segments = diarize_pipeline(audio)
+
+                # Assign speaker labels to words/segments
+                wx_result = whisperx.assign_word_speakers(diarize_segments, wx_result)
+                print("Diarization complete.")
+
+                text = _format_diarized_segments(wx_result["segments"])
+                return jsonify({
+                    "text": text,
+                    "language": language,
+                    "diarized": True,
+                })
+
+            else:
+                # ── Standard Whisper path (unchanged) ───────────────────
+                print(f"Transcribing file: {f.filename}")
+                result = model.transcribe(tmp_path)
+                print(f"Transcription complete. Language: {result.get('language')}")
+                return jsonify({
+                    "text": result.get("text", "").strip(),
+                    "language": result.get("language", "unknown"),
+                    "diarized": False,
+                })
+
+        finally:
+            os.unlink(tmp_path)
 
     except Exception as e:
         print(f"Transcription error: {str(e)}")

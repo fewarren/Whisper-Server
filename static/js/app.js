@@ -8,6 +8,9 @@ const fileSize = document.getElementById('fileSize');
 const removeFile = document.getElementById('removeFile');
 const transcribeBtn = document.getElementById('transcribeBtn');
 const progressSection = document.getElementById('progressSection');
+const progressTitle = document.getElementById('progressTitle');
+const progressMessage = document.getElementById('progressMessage');
+const progressNote = document.getElementById('progressNote');
 const resultSection = document.getElementById('resultSection');
 const errorSection = document.getElementById('errorSection');
 const resultText = document.getElementById('resultText');
@@ -19,6 +22,11 @@ const retryBtn = document.getElementById('retryBtn');
 const errorMessage = document.getElementById('errorMessage');
 const toast = document.getElementById('toast');
 const deviceInfo = document.getElementById('deviceInfo');
+
+// Diarization toggle
+const diarizeToggle = document.getElementById('diarizeToggle');
+const diarizeUnavailable = document.getElementById('diarizeUnavailable');
+const diarizeSubtitle = document.getElementById('diarizeSubtitle');
 
 // Inline reformat (from transcription result)
 const reformatFromResultBtn = document.getElementById('reformatFromResultBtn');
@@ -60,6 +68,7 @@ const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'aud
 // ── Initialize ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     fetchDeviceInfo();
+    fetchDiarizationStatus();
     setupEventListeners();
     setupTabListeners();
     setupReformatListeners();
@@ -73,6 +82,26 @@ async function fetchDeviceInfo() {
         deviceInfo.textContent = data.device.toUpperCase();
     } catch (error) {
         console.error('Failed to fetch device info:', error);
+    }
+}
+
+// Fetch diarization availability
+async function fetchDiarizationStatus() {
+    try {
+        const response = await fetch('/api/diarization-status');
+        const data = await response.json();
+        if (data.available) {
+            diarizeToggle.disabled = false;
+            diarizeSubtitle.textContent = 'Identify who is speaking using voice analysis';
+            diarizeUnavailable.style.display = 'none';
+        } else {
+            diarizeToggle.disabled = true;
+            diarizeSubtitle.textContent = 'Unavailable — HF_TOKEN not configured';
+            diarizeUnavailable.style.display = 'flex';
+        }
+    } catch (error) {
+        console.error('Failed to fetch diarization status:', error);
+        diarizeToggle.disabled = true;
     }
 }
 
@@ -216,18 +245,29 @@ async function startTranscription() {
         return;
     }
 
-    // Show progress
+    const diarize = diarizeToggle && diarizeToggle.checked && !diarizeToggle.disabled;
+
+    // Show progress with appropriate messages
     uploadSection.style.display = 'none';
     progressSection.style.display = 'block';
+    if (diarize) {
+        progressTitle.textContent = 'Transcribing & identifying speakers...';
+        progressMessage.textContent = 'WhisperX is transcribing, aligning, and diarizing your audio.';
+        progressNote.textContent = 'Speaker identification adds extra processing time. A 1-hour file may take 45-75 minutes.';
+    } else {
+        progressTitle.textContent = 'Transcribing your audio...';
+        progressMessage.textContent = 'This may take a few moments depending on the file size';
+        progressNote.textContent = 'Large files (1+ hour) may take 30-60 minutes to process. Please be patient.';
+    }
 
     const formData = new FormData();
     formData.append('file', selectedFile);
+    if (diarize) formData.append('diarize', 'true');
 
     try {
-        // Create abort controller for timeout
-        // 2 hour timeout for large files (1 hour audio can take 30-60 minutes to process)
+        // 2 hour timeout for large files (diarization can take longer)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 7200000); // 2 hour timeout
+        const timeoutId = setTimeout(() => controller.abort(), 7200000);
 
         const response = await fetch('/transcribe', {
             method: 'POST',
@@ -263,7 +303,8 @@ async function startTranscription() {
 
 function displayResult(data) {
     resultText.textContent = data.text || 'No transcription available';
-    languageBadge.textContent = data.language ? getLanguageName(data.language) : 'Unknown';
+    const langName = data.language ? getLanguageName(data.language) : 'Unknown';
+    languageBadge.textContent = data.diarized ? `${langName} · 🎤 Diarized` : langName;
     resultSection.style.display = 'block';
 }
 
