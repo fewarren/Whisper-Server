@@ -163,8 +163,7 @@ function setupEventListeners() {
     reformatFromResultBtn.addEventListener('click', startInlineReformat);
     copyFormattedBtn.addEventListener('click', () => copyText(inlineReformatResult, 'Formatted text copied!'));
     downloadFormattedBtn.addEventListener('click', () => {
-        const base = baseNameOf(selectedFile) || 'formatted_transcript';
-        downloadText(inlineReformatResult, `${base}_formatted.txt`);
+        downloadText(inlineReformatResult, makeFormattedFilename(selectedFile));
     });
 }
 
@@ -186,8 +185,7 @@ function setupReformatListeners() {
     reformatSubmitBtn.addEventListener('click', startReformat);
     copyReformatBtn.addEventListener('click', () => copyText(reformatResult, 'Formatted text copied!'));
     downloadReformatBtn.addEventListener('click', () => {
-        const base = baseNameOf(selectedReformatFile) || 'formatted_transcript';
-        downloadText(reformatResult, `${base}_formatted.txt`);
+        downloadText(reformatResult, makeFormattedFilename(selectedReformatFile));
     });
     newReformatBtn.addEventListener('click', resetReformat);
     reformatRetryBtn.addEventListener('click', resetReformat);
@@ -394,8 +392,7 @@ function copyToClipboard() {
 
 // Download transcription
 function downloadTranscription() {
-    const base = baseNameOf(selectedFile) || `transcription_${Date.now()}`;
-    downloadText(transcriptionResult && transcriptionResult.text, `${base}.txt`);
+    downloadText(transcriptionResult && transcriptionResult.text, makeTranscriptFilename(selectedFile));
 }
 
 // ── Toast notifications ───────────────────────────────────────
@@ -420,6 +417,25 @@ function baseNameOf(file) {
     return file.name.replace(/\.[^.]+$/, '');
 }
 
+function sanitizeDownloadBaseName(name, fallback = 'transcript') {
+    const cleaned = String(name || '')
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, '_')
+        .replace(/\s+/g, '_')
+        .replace(/_formatted$/i, '');
+
+    return cleaned || fallback;
+}
+
+function makeTranscriptFilename(file) {
+    const fallback = `transcription_${Date.now()}`;
+    return `${sanitizeDownloadBaseName(baseNameOf(file), fallback)}.txt`;
+}
+
+function makeFormattedFilename(file) {
+    return `${sanitizeDownloadBaseName(baseNameOf(file))}_formatted.txt`;
+}
+
 function downloadText(text, filename) {
     if (!text) { showToast('No text to download', 'error'); return; }
     const blob = new Blob([text], { type: 'text/plain' });
@@ -431,7 +447,7 @@ function downloadText(text, filename) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast('Downloaded!', 'success');
+    showToast(`Downloaded ${a.download}`, 'success');
 }
 
 // Central reformat API call
