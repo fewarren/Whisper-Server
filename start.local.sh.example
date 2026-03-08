@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# start.local.sh.example — local-only launcher with HF_TOKEN
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set your local Hugging Face token here, then copy this file to start.local.sh.
+export HF_TOKEN="hf_your_token_here"
+
+exec "$SCRIPT_DIR/start.sh" "$@"

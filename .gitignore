@@ -63,6 +63,7 @@ temp/
 
 # Local environment / secrets
 /.env.local
+/start.local.sh
 
 # PyTorch/CUDA directories (if present in project root)
 /torch

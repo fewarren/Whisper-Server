@@ -68,7 +68,7 @@ let reformatResult = null;        // result from tab-2 reformat
 let inlineReformatResult = null;  // result from inline reformat (tab-1)
 
 // Constants
-const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB
+const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg', 'audio/webm', 'video/mp4'];
 
 // ── Initialize ────────────────────────────────────────────────
@@ -230,7 +230,7 @@ function validateAndSetFile(file) {
     
     // Check file size
     if (file.size > MAX_FILE_SIZE) {
-        showToast('File size must be less than 1GB', 'error');
+        showToast('File size must be less than 10 GB', 'error');
         return;
     }
     

@@ -49,7 +49,7 @@ def _load_diarization_pipeline(hf_token: str):
 
 # Initialize Flask app
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB max file size
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10 GB max file size
 
 # Ollama configuration
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -331,7 +331,7 @@ def reformat():
 @app.errorhandler(413)
 def request_entity_too_large(error):
     """Handle file too large error"""
-    return jsonify({"error": "File too large. Maximum size is 1GB"}), 413
+    return jsonify({"error": "File too large. Maximum size is 10 GB"}), 413
 
 @app.errorhandler(500)
 def internal_server_error(error):

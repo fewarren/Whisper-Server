@@ -2,10 +2,16 @@
 
 A production-ready web application built around **WhisperX** (OpenAI Whisper + CTranslate2) and **pyannote.audio**. Upload audio files or MP4 videos and get accurate, timestamped transcriptions with optional speaker identification — all running 100% locally on your hardware.
 
+## 📝 Recent Update
+
+- Added end-to-end **MP4 video transcription** support by extracting the audio track automatically via `ffmpeg`
+- Updated the UI and Help dialog to clearly advertise **Audio / Video** transcription support
+- Added a safer secret-handling flow so `HF_TOKEN` can stay in local-only files instead of tracked source
+
 ## ✨ Features
 
 - **Modern Web Interface**: Clean, responsive tabbed UI with drag-and-drop file upload and in-app Help dialog
-- **Multiple Input Formats**: Supports WAV, MP3, M4A, FLAC, OGG, WebM, and MP4 (up to 1 GB)
+- **Multiple Input Formats**: Supports WAV, MP3, M4A, FLAC, OGG, WebM, and MP4 (up to 10 GB)
 - **Automatic Language Detection**: Detects and displays the spoken language (40+ languages)
 - **GPU Acceleration**: Automatically uses CUDA if available for faster transcription
 - **Speaker Identification**: Optional diarization via pyannote.audio — labels each speaker (`SPEAKER_00`, `SPEAKER_01`, …) with timestamps, running entirely locally
@@ -76,6 +82,22 @@ Speaker Identification uses the free, gated `pyannote/speaker-diarization-commun
    ```
 5. Run `./start.sh` — it auto-loads `.env.local` if present.
 
+#### Optional: use a dedicated local start script instead
+
+If you prefer keeping the token in a startup script instead of `.env.local`:
+
+```bash
+cp start.local.sh.example start.local.sh
+```
+
+Then edit `start.local.sh`, set your real `HF_TOKEN`, and run:
+
+```bash
+./start.local.sh
+```
+
+`start.local.sh` is gitignored, so it will stay local to your machine.
+
 > **Note:** The HF token is only needed once for the initial model download (~1 GB). After that, everything runs completely offline.
 
 ### Running the Application
@@ -98,6 +120,7 @@ The header will show whether the server is using **CPU** or **CUDA**.
 whisper-app/
 ├── app.py                      # Flask backend (WhisperX, diarization, Ollama)
 ├── start.sh                    # Startup script (loads .env.local, launches server)
+├── start.local.sh.example      # Example local launcher with HF_TOKEN placeholder
 ├── .env.local.example          # Example local secrets file for HF_TOKEN
 ├── templates/
 │   └── index.html             # Main web interface (tabbed UI + help modal)
@@ -117,7 +140,7 @@ whisper-app/
 ### 🎙️ Tab 1: Transcribe Audio / Video
 
 1. Open http://localhost:5000 in your web browser.
-2. Either **drag and drop** an audio file or MP4 video, or click to browse. Supported formats: WAV, MP3, M4A, FLAC, OGG, WebM, MP4 (up to 1 GB). MP4 uploads are transcribed by automatically extracting the audio track via `ffmpeg`.
+2. Either **drag and drop** an audio file or MP4 video, or click to browse. Supported formats: WAV, MP3, M4A, FLAC, OGG, WebM, MP4 (up to 10 GB). MP4 uploads are transcribed by automatically extracting the audio track via `ffmpeg`.
 3. *(Optional)* Enable the **Speaker Identification** toggle to detect distinct voices. Each speaker is labelled `SPEAKER_00`, `SPEAKER_01`, … with timestamps.
 4. Click **"Start Transcription"** and wait for the result.
 5. Once complete, you can:
@@ -270,16 +293,16 @@ LLM_MODEL = "llama3.1:8b"   # default
 ```
 
 ### File Size Limit
-Default is 1 GB. To change, update both `app.py` and `static/js/app.js`:
+Default is 10 GB. To change, update both `app.py` and `static/js/app.js`:
 
 ```python
 # app.py
-app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1 GB
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10 GB
 ```
 
 ```javascript
 // static/js/app.js
-const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GB
+const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 ```
 
 ### Port
@@ -335,7 +358,7 @@ For large files or production use, consider using a production WSGI server like 
 - **Small files** (< 10MB / ~10 min audio): 5-30 seconds
 - **Medium files** (10-100MB / ~10-60 min audio): 30 seconds - 5 minutes
 - **Large files** (100-500MB / ~1-3 hour audio): 5-30 minutes
-- **Very large files** (500MB-1GB / ~3-6 hour audio): 30-60+ minutes
+- **Very large files** (500MB-10GB / very long audio/video): 30-60+ minutes
 
 *Times vary based on hardware, model size, and audio length. GPU acceleration significantly reduces processing time. The client timeout is set to 2 hours to accommodate very large files.*
 
