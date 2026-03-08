@@ -37,10 +37,12 @@ def _load_diarization_pipeline(hf_token: str):
     """Lazy-load the pyannote diarization pipeline."""
     global _diarization_pipeline
     if _diarization_pipeline is None:
-        import whisperx
-        print("Loading diarization pipeline...")
-        _diarization_pipeline = whisperx.DiarizationPipeline(
-            use_auth_token=hf_token, device=DEVICE
+        from whisperx.diarize import DiarizationPipeline
+        print("Loading diarization pipeline (pyannote/speaker-diarization-community-1)...")
+        _diarization_pipeline = DiarizationPipeline(
+            model_name="pyannote/speaker-diarization-community-1",
+            token=hf_token,
+            device=DEVICE,
         )
         print("Diarization pipeline loaded.")
     return _diarization_pipeline
@@ -205,7 +207,7 @@ def _format_diarized_segments(segments) -> str:
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
-    """Handle audio file transcription, with optional speaker diarization."""
+    """Handle media file transcription, with optional speaker diarization."""
     # Validate file upload
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
@@ -215,7 +217,7 @@ def transcribe():
         return jsonify({"error": "Empty filename"}), 400
 
     # Validate file extension
-    allowed_extensions = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.webm'}
+    allowed_extensions = ('.wav', '.mp3', '.m4a', '.flac', '.ogg', '.webm', '.mp4')
     file_ext = os.path.splitext(f.filename)[1].lower()
     if file_ext not in allowed_extensions:
         return jsonify({"error": f"Unsupported file format. Allowed formats: {', '.join(allowed_extensions)}"}), 400
@@ -230,7 +232,7 @@ def transcribe():
                 "Set the HF_TOKEN environment variable and restart the server. "
                 "Get a free token at https://huggingface.co/settings/tokens "
                 "and accept the pyannote model license at "
-                "https://huggingface.co/pyannote/speaker-diarization-3.1"
+                "https://huggingface.co/pyannote/speaker-diarization-community-1"
             )
         }), 503
 

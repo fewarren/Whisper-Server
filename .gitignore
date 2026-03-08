@@ -61,7 +61,12 @@ temp/
 # Debian packages
 *.deb
 
+# Local environment / secrets
+/.env.local
+
 # PyTorch/CUDA directories (if present in project root)
+/torch
+/whisper
 /torch/
 /whisper/
 /cuda-keyring_*.deb

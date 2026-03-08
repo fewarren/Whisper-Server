@@ -37,6 +37,11 @@ const reformatInlineText = document.getElementById('reformatInlineText');
 const copyFormattedBtn = document.getElementById('copyFormattedBtn');
 const downloadFormattedBtn = document.getElementById('downloadFormattedBtn');
 
+// ── Help modal ────────────────────────────────────────────────
+const helpBtn        = document.getElementById('helpBtn');
+const helpModal      = document.getElementById('helpModal');
+const helpModalClose = document.getElementById('helpModalClose');
+
 // ── Tab 2: Reformat ───────────────────────────────────────────
 const reformatUploadArea = document.getElementById('reformatUploadArea');
 const reformatFileInput = document.getElementById('reformatFileInput');
@@ -57,13 +62,14 @@ const reformatRetryBtn = document.getElementById('reformatRetryBtn');
 
 // ── State ─────────────────────────────────────────────────────
 let selectedFile = null;
+let selectedReformatFile = null;  // file loaded in tab-2
 let transcriptionResult = null;
 let reformatResult = null;        // result from tab-2 reformat
 let inlineReformatResult = null;  // result from inline reformat (tab-1)
 
 // Constants
 const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB
-const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg', 'audio/webm'];
+const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg', 'audio/webm', 'video/mp4'];
 
 // ── Initialize ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -72,7 +78,24 @@ document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     setupTabListeners();
     setupReformatListeners();
+    setupHelpModal();
 });
+
+// ── Help modal ────────────────────────────────────────────────
+function setupHelpModal() {
+    helpBtn.addEventListener('click', () => helpModal.classList.add('open'));
+    helpModalClose.addEventListener('click', () => helpModal.classList.remove('open'));
+    // Close when clicking the dark overlay (outside the dialog)
+    helpModal.addEventListener('click', (e) => {
+        if (e.target === helpModal) helpModal.classList.remove('open');
+    });
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && helpModal.classList.contains('open')) {
+            helpModal.classList.remove('open');
+        }
+    });
+}
 
 // Fetch device info from server
 async function fetchDeviceInfo() {
@@ -139,7 +162,10 @@ function setupEventListeners() {
     // Inline reformat (from transcription result)
     reformatFromResultBtn.addEventListener('click', startInlineReformat);
     copyFormattedBtn.addEventListener('click', () => copyText(inlineReformatResult, 'Formatted text copied!'));
-    downloadFormattedBtn.addEventListener('click', () => downloadText(inlineReformatResult, 'formatted_transcript.txt'));
+    downloadFormattedBtn.addEventListener('click', () => {
+        const base = baseNameOf(selectedFile) || 'formatted_transcript';
+        downloadText(inlineReformatResult, `${base}_formatted.txt`);
+    });
 }
 
 // ── Tab 2 event listeners ─────────────────────────────────────
@@ -159,7 +185,10 @@ function setupReformatListeners() {
     clearReformatFile.addEventListener('click', clearReformatFileHandler);
     reformatSubmitBtn.addEventListener('click', startReformat);
     copyReformatBtn.addEventListener('click', () => copyText(reformatResult, 'Formatted text copied!'));
-    downloadReformatBtn.addEventListener('click', () => downloadText(reformatResult, 'formatted_transcript.txt'));
+    downloadReformatBtn.addEventListener('click', () => {
+        const base = baseNameOf(selectedReformatFile) || 'formatted_transcript';
+        downloadText(reformatResult, `${base}_formatted.txt`);
+    });
     newReformatBtn.addEventListener('click', resetReformat);
     reformatRetryBtn.addEventListener('click', resetReformat);
 }
@@ -194,8 +223,8 @@ function handleDrop(e) {
 
 function validateAndSetFile(file) {
     // Check file type
-    if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(wav|mp3|m4a|flac|ogg|webm)$/i)) {
-        showToast('Please select a valid audio file', 'error');
+    if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(wav|mp3|m4a|flac|ogg|webm|mp4)$/i)) {
+        showToast('Please select a valid audio or MP4 video file', 'error');
         return;
     }
     
@@ -252,10 +281,10 @@ async function startTranscription() {
     progressSection.style.display = 'block';
     if (diarize) {
         progressTitle.textContent = 'Transcribing & identifying speakers...';
-        progressMessage.textContent = 'WhisperX is transcribing, aligning, and diarizing your audio.';
+        progressMessage.textContent = 'WhisperX is transcribing, aligning, and diarizing the extracted audio.';
         progressNote.textContent = 'Speaker identification adds extra processing time. A 1-hour file may take 45-75 minutes.';
     } else {
-        progressTitle.textContent = 'Transcribing your audio...';
+        progressTitle.textContent = 'Transcribing your file...';
         progressMessage.textContent = 'This may take a few moments depending on the file size';
         progressNote.textContent = 'Large files (1+ hour) may take 30-60 minutes to process. Please be patient.';
     }
@@ -294,7 +323,7 @@ async function startTranscription() {
         progressSection.style.display = 'none';
 
         if (error.name === 'AbortError') {
-            showError('Transcription timed out. The file may be too large or complex. Please try a shorter audio file.');
+            showError('Transcription timed out. The file may be too large or complex. Please try a shorter file.');
         } else {
             showError(error.message || 'An unexpected error occurred. Please try again.');
         }
@@ -365,7 +394,8 @@ function copyToClipboard() {
 
 // Download transcription
 function downloadTranscription() {
-    downloadText(transcriptionResult && transcriptionResult.text, `transcription_${Date.now()}.txt`);
+    const base = baseNameOf(selectedFile) || `transcription_${Date.now()}`;
+    downloadText(transcriptionResult && transcriptionResult.text, `${base}.txt`);
 }
 
 // ── Toast notifications ───────────────────────────────────────
@@ -382,6 +412,12 @@ function copyText(text, successMsg) {
     navigator.clipboard.writeText(text)
         .then(() => showToast(successMsg || 'Copied!', 'success'))
         .catch(() => showToast('Failed to copy text', 'error'));
+}
+
+// Return the base name of a File (strips extension)
+function baseNameOf(file) {
+    if (!file) return null;
+    return file.name.replace(/\.[^.]+$/, '');
 }
 
 function downloadText(text, filename) {
@@ -458,6 +494,7 @@ function loadReformatFile(file) {
         showToast('Please select a .txt file', 'error');
         return;
     }
+    selectedReformatFile = file;
     const reader = new FileReader();
     reader.onload = e => {
         reformatTextarea.value = e.target.result;
@@ -469,6 +506,7 @@ function loadReformatFile(file) {
 }
 
 function clearReformatFileHandler() {
+    selectedReformatFile = null;
     reformatFileInput.value = '';
     reformatTextarea.value = '';
     reformatFileInfo.style.display = 'none';
@@ -502,6 +540,7 @@ async function startReformat() {
 
 function resetReformat() {
     reformatResult = null;
+    selectedReformatFile = null;
     reformatTextarea.value = '';
     reformatFileInput.value = '';
     reformatFileInfo.style.display = 'none';

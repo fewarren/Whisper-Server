@@ -9,6 +9,18 @@ VENV_PYTHON="$SCRIPT_DIR/venv/bin/python"
 APP="$SCRIPT_DIR/app.py"
 PORT=5000
 
+# ── Local environment (gitignored) ────────────────────────────────────────────
+ENV_FILE="$SCRIPT_DIR/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+fi
+
+# ── Hugging Face token (required for speaker diarization) ─────────────────────
+# Provide HF_TOKEN via your shell environment or a local .env.local file.
+
 # ── Colours ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
@@ -73,9 +85,9 @@ if [[ -n "${HF_TOKEN:-}" ]]; then
     ok "HF_TOKEN set — speaker diarization enabled"
 else
     warn "HF_TOKEN not set — speaker diarization will be disabled"
-    info "To enable: export HF_TOKEN='hf_...' then restart"
+    info "To enable: add HF_TOKEN to .env.local or export HF_TOKEN='hf_...', then restart"
     info "Get a token at: ${CYAN}https://huggingface.co/settings/tokens${RESET}"
-    info "Accept model license: ${CYAN}https://huggingface.co/pyannote/speaker-diarization-3.1${RESET}"
+    info "Accept model license: ${CYAN}https://huggingface.co/pyannote/speaker-diarization-community-1${RESET}"
 fi
 
 # CUDA availability (warning only — CPU fallback is supported)
