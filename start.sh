@@ -76,7 +76,7 @@ if [[ -f "$PID_FILE" ]]; then
     rm -f "$PID_FILE"
 fi
 
-PORT_PIDS=$(lsof -ti:"$PORT" 2>/dev/null || true)
+PORT_PIDS=$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
 if [[ -n "$PORT_PIDS" ]]; then
     MATCHED_PIDS=()
     FOREIGN_PIDS=()
