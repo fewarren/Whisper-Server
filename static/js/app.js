@@ -38,9 +38,11 @@ const copyFormattedBtn = document.getElementById('copyFormattedBtn');
 const downloadFormattedBtn = document.getElementById('downloadFormattedBtn');
 
 // ── Help modal ────────────────────────────────────────────────
+const appShell = document.getElementById('appShell');
 const helpBtn        = document.getElementById('helpBtn');
 const helpModal      = document.getElementById('helpModal');
 const helpModalClose = document.getElementById('helpModalClose');
+const helpModalDialog = helpModal.querySelector('.modal-dialog');
 
 // ── Tab 2: Reformat ───────────────────────────────────────────
 const reformatUploadArea = document.getElementById('reformatUploadArea');
@@ -70,6 +72,10 @@ let inlineReformatResult = null;  // result from inline reformat (tab-1)
 // Constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg', 'audio/webm', 'video/mp4'];
+const HELP_MODAL_FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const DEFAULT_REFORMAT_BUTTON_HTML = reformatFromResultBtn.innerHTML.trim();
+
+let lastFocusedElement = null;
 
 // ── Initialize ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -81,23 +87,131 @@ document.addEventListener('DOMContentLoaded', () => {
     setupHelpModal();
 });
 
-// ── Help modal ────────────────────────────────────────────────
+/**
+ * Set up event handlers that manage opening, closing, and keyboard focus behavior for the help modal.
+ *
+ * Registers click handlers to open and close the modal, closes the modal when clicking the overlay,
+ * and handles `Escape` to close and `Tab` to trap focus while the modal is open.
+ */
 function setupHelpModal() {
-    helpBtn.addEventListener('click', () => helpModal.classList.add('open'));
-    helpModalClose.addEventListener('click', () => helpModal.classList.remove('open'));
+    helpBtn.addEventListener('click', openHelpModal);
+    helpModalClose.addEventListener('click', closeHelpModal);
+
     // Close when clicking the dark overlay (outside the dialog)
     helpModal.addEventListener('click', (e) => {
-        if (e.target === helpModal) helpModal.classList.remove('open');
+        if (e.target === helpModal) closeHelpModal();
     });
-    // Close on Escape key
+
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && helpModal.classList.contains('open')) {
-            helpModal.classList.remove('open');
+        if (!helpModal.classList.contains('open')) return;
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeHelpModal();
+            return;
+        }
+
+        if (e.key === 'Tab') {
+            trapHelpModalFocus(e);
         }
     });
 }
 
-// Fetch device info from server
+/**
+ * Open the help modal, store the previously focused element, make the main app shell inert for accessibility, and move focus into the modal.
+ *
+ * This sets the modal's visible/ARIA state and shifts keyboard focus to the first available focusable element inside the modal (or to the dialog container as a fallback).
+ */
+function openHelpModal() {
+    lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    helpModal.classList.add('open');
+    helpModal.setAttribute('aria-hidden', 'false');
+
+    if (appShell) {
+        appShell.setAttribute('aria-hidden', 'true');
+        appShell.setAttribute('inert', '');
+    }
+
+    const focusable = getHelpModalFocusableElements();
+    (focusable[0] || helpModalDialog || helpModal).focus();
+}
+
+/**
+ * Close the help modal, restore page accessibility state, and return focus to the previously focused element.
+ *
+ * Removes the modal's visible/open state and sets its `aria-hidden` attribute to true. If the application
+ * shell element exists, its `aria-hidden` and `inert` attributes are removed to make the page interactive again.
+ * If a previously focused element was recorded, focus is moved back to that element.
+ */
+function closeHelpModal() {
+    helpModal.classList.remove('open');
+    helpModal.setAttribute('aria-hidden', 'true');
+
+    if (appShell) {
+        appShell.removeAttribute('aria-hidden');
+        appShell.removeAttribute('inert');
+    }
+
+    if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+        lastFocusedElement.focus();
+    }
+}
+
+/**
+ * Retrieve focusable elements inside the help modal that are not marked with `aria-hidden`.
+ * @returns {HTMLElement[]} An array of HTMLElements found within the help modal matching focusable selectors defined by `HELP_MODAL_FOCUSABLE` and not having the `aria-hidden` attribute.
+ */
+function getHelpModalFocusableElements() {
+    return Array.from(helpModal.querySelectorAll(HELP_MODAL_FOCUSABLE)).filter((element) => (
+        element instanceof HTMLElement && !element.hasAttribute('aria-hidden')
+    ));
+}
+
+/**
+ * Keep keyboard focus trapped inside the help modal when tabbing.
+ *
+ * When the user presses Tab or Shift+Tab, prevents focus from leaving the modal by
+ * cycling focus to the first or last focusable element as appropriate. If the modal
+ * has no focusable elements, focuses the modal container itself.
+ *
+ * @param {KeyboardEvent} event - The keyboard event for Tab navigation; the function
+ *   prevents the event's default behavior when it adjusts focus.
+ */
+function trapHelpModalFocus(event) {
+    const focusable = getHelpModalFocusableElements();
+    if (!focusable.length) {
+        event.preventDefault();
+        helpModal.focus();
+        return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (!helpModal.contains(active)) {
+        event.preventDefault();
+        first.focus();
+        return;
+    }
+
+    if (event.shiftKey && (active === first || active === helpModal)) {
+        event.preventDefault();
+        last.focus();
+        return;
+    }
+
+    if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
+/**
+ * Populate the global `deviceInfo` element with the server-provided device code in uppercase.
+ *
+ * If the request fails or the response cannot be parsed, logs an error to the console and leaves `deviceInfo` unchanged.
+ */
 async function fetchDeviceInfo() {
     try {
         const response = await fetch('/api/device-info');
@@ -252,10 +366,18 @@ function formatFileSize(bytes) {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
+/**
+ * Reset the upload tab to its initial state.
+ *
+ * Clears the selected file and transcription state, resets the file input,
+ * clears inline reformat state, and restores the upload UI (shows upload area
+ * and hides file info, progress, results, and error sections).
+ */
 function resetUpload() {
     selectedFile = null;
     transcriptionResult = null;
     fileInput.value = '';
+    resetInlineReformatState();
 
     uploadArea.style.display = 'block';
     fileSelected.style.display = 'none';
@@ -265,7 +387,27 @@ function resetUpload() {
     uploadSection.style.display = 'block';
 }
 
-// Transcription
+/**
+ * Reset the inline reformat UI and associated state to its initial, idle state.
+ *
+ * Clears any stored inline reformat result and text, hides progress/result sections,
+ * and restores the reformat-from-result button to its default enabled state and label.
+ */
+function resetInlineReformatState() {
+    inlineReformatResult = null;
+    reformatInlineText.textContent = '';
+    reformatInline.style.display = 'none';
+    reformatInlineProgress.style.display = 'none';
+    reformatInlineResult.style.display = 'none';
+    reformatFromResultBtn.disabled = false;
+    reformatFromResultBtn.innerHTML = DEFAULT_REFORMAT_BUTTON_HTML;
+}
+
+/**
+ * Uploads the currently selected file to the server for transcription and updates the UI with progress and results.
+ *
+ * Sends the selected file (and the diarization flag if enabled) to the /transcribe endpoint, stores the returned transcription in the global `transcriptionResult`, and displays either the transcription result or an error message in the UI.
+ */
 async function startTranscription() {
     if (!selectedFile) {
         showToast('Please select a file first', 'error');
@@ -466,16 +608,21 @@ async function callReformat(text) {
     return data.formatted_text;
 }
 
-// ── Inline reformat (Tab 1, after transcription) ──────────────
+/**
+ * Start an inline reformat of the current transcription and display the formatted text.
+ *
+ * If there is no transcription, shows an error toast and returns without action.
+ * While running, updates inline reformat UI (shows progress, disables the reformat button) and scrolls the progress into view.
+ * On success, stores the formatted text in `inlineReformatResult` and reveals the formatted result in the UI.
+ * On failure, resets inline reformat state and shows an error toast with the failure message.
+ */
 async function startInlineReformat() {
     if (!transcriptionResult || !transcriptionResult.text) {
         showToast('No transcription to reformat', 'error');
         return;
     }
 
-    // Reset prior inline result
-    inlineReformatResult = null;
-    reformatInlineResult.style.display = 'none';
+    resetInlineReformatState();
     reformatInlineProgress.style.display = 'flex';
     reformatInline.style.display = 'block';
     reformatFromResultBtn.disabled = true;
@@ -492,14 +639,7 @@ async function startInlineReformat() {
         reformatInlineResult.style.display = 'block';
         reformatFromResultBtn.textContent = '✓ Reformatted';
     } catch (error) {
-        reformatInlineProgress.style.display = 'none';
-        reformatInline.style.display = 'none';
-        reformatFromResultBtn.disabled = false;
-        reformatFromResultBtn.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
-            </svg>
-            Reformat with AI`;
+        resetInlineReformatState();
         showToast(error.message || 'Reformat failed', 'error');
     }
 }

@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PYTHON="$SCRIPT_DIR/venv/bin/python"
 APP="$SCRIPT_DIR/app.py"
 PORT=5000
+PID_FILE="$SCRIPT_DIR/.whisper-app.pid"
 
 # ── Local environment (gitignored) ────────────────────────────────────────────
 ENV_FILE="$SCRIPT_DIR/.env.local"
@@ -27,8 +28,36 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 
 ok()   { echo -e "  ${GREEN}✔${RESET}  $*"; }
 warn() { echo -e "  ${YELLOW}⚠${RESET}  $*"; }
+# fail prints a red "✘" followed by the provided message using the $RED and $RESET color variables.
 fail() { echo -e "  ${RED}✘${RESET}  $*"; }
+# info prints its arguments as an informational message prefixed with a cyan arrow and resets terminal color.
 info() { echo -e "  ${CYAN}→${RESET}  $*"; }
+
+# pid_matches_app checks whether the given PID corresponds to the running app process by inspecting the process command line for the APP path.
+pid_matches_app() {
+    local pid="${1:-}"
+    local cmd
+
+    [[ -n "$pid" ]] || return 1
+    cmd=$(ps -p "$pid" -o args= 2>/dev/null || true)
+    [[ -n "$cmd" && "$cmd" == *"$APP"* ]]
+}
+
+# stop_pid attempts to gracefully terminate the process with the given PID, waits up to 10 seconds for it to exit, and sends SIGKILL if it remains running.
+stop_pid() {
+    local pid="$1"
+
+    kill "$pid" 2>/dev/null || true
+    for _ in {1..10}; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    kill -9 "$pid" 2>/dev/null || true
+    sleep 1
+}
 
 echo -e "\n${BOLD}Whisper Transcription Server — Startup${RESET}"
 echo    "──────────────────────────────────────────"
@@ -36,19 +65,56 @@ echo    "───────────────────────�
 # ── Step 1: Stop any running server ──────────────────────────────────────────
 echo -e "\n${BOLD}[1/4] Stopping existing server processes...${RESET}"
 
-PIDS=$(lsof -ti:"$PORT" 2>/dev/null || true)
-if [[ -n "$PIDS" ]]; then
-    echo "$PIDS" | xargs kill 2>/dev/null || true
-    sleep 1
-    # Force-kill anything still holding the port
-    REMAINING=$(lsof -ti:"$PORT" 2>/dev/null || true)
-    if [[ -n "$REMAINING" ]]; then
-        echo "$REMAINING" | xargs kill -9 2>/dev/null || true
-        sleep 1
+STOPPED_ANY=false
+
+if [[ -f "$PID_FILE" ]]; then
+    TRACKED_PID=$(tr -dc '0-9' < "$PID_FILE")
+    if [[ -n "$TRACKED_PID" ]] && pid_matches_app "$TRACKED_PID"; then
+        info "Stopping tracked Whisper server (PID $TRACKED_PID)..."
+        stop_pid "$TRACKED_PID"
+        STOPPED_ANY=true
+        ok "Stopped tracked Whisper server (PID $TRACKED_PID)"
+    else
+        warn "Ignoring stale or unrecognized PID file at $PID_FILE"
     fi
-    ok "Stopped process(es) on port $PORT (PIDs: $PIDS)"
-else
-    ok "No process running on port $PORT"
+    rm -f "$PID_FILE"
+fi
+
+PORT_PIDS=$(lsof -ti:"$PORT" 2>/dev/null || true)
+if [[ -n "$PORT_PIDS" ]]; then
+    MATCHED_PIDS=()
+    FOREIGN_PIDS=()
+
+    while IFS= read -r pid; do
+        [[ -n "$pid" ]] || continue
+        if pid_matches_app "$pid"; then
+            MATCHED_PIDS+=("$pid")
+        else
+            FOREIGN_PIDS+=("$pid")
+        fi
+    done <<< "$PORT_PIDS"
+
+    if (( ${#MATCHED_PIDS[@]} > 0 )); then
+        for pid in "${MATCHED_PIDS[@]}"; do
+            info "Stopping Whisper server on port $PORT (PID $pid)..."
+            stop_pid "$pid"
+        done
+        STOPPED_ANY=true
+        ok "Stopped Whisper server process(es): ${MATCHED_PIDS[*]}"
+    fi
+
+    if (( ${#FOREIGN_PIDS[@]} > 0 )); then
+        fail "Port $PORT is in use by a different process. Refusing to kill it automatically."
+        for pid in "${FOREIGN_PIDS[@]}"; do
+            warn "PID $pid: $(ps -p "$pid" -o args= 2>/dev/null || echo unknown)"
+        done
+        warn "Stop the conflicting process manually or change PORT before retrying."
+        exit 1
+    fi
+fi
+
+if [[ "$STOPPED_ANY" != true ]]; then
+    ok "No tracked Whisper server running on port $PORT"
 fi
 
 # ── Step 2: Verify Python environment ────────────────────────────────────────
@@ -139,8 +205,10 @@ echo -e "\n${BOLD}[4/4] Starting Whisper server...${RESET}"
 info "URL:   http://localhost:$PORT"
 info "App:   $APP"
 info "Model: $LLM_MODEL"
+info "PID:   $$ (saved to $PID_FILE)"
 echo    "──────────────────────────────────────────"
 echo
 
+echo $$ > "$PID_FILE"
 exec "$VENV_PYTHON" "$APP"
 
