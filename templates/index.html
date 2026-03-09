@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="container">
+    <div class="container" id="appShell">
         <header>
             <h1>🎙️ Whisper Audio/Video Transcription</h1>
             <p class="subtitle">Convert audio files and MP4 videos to text using WhisperX</p>
@@ -272,7 +272,7 @@
     <div class="toast" id="toast"></div>
 
     <!-- ===== HELP MODAL ===== -->
-    <div class="modal-overlay" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+    <div class="modal-overlay" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" aria-hidden="true" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-header">
                 <h2 id="helpModalTitle">❓ How to Use</h2>
@@ -318,7 +318,7 @@
                     <ol>
                         <li>Create a free Hugging Face account and generate a token at <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">huggingface.co/settings/tokens ↗</a>.</li>
                         <li>Accept the model licence at <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noopener">pyannote/speaker-diarization-community-1 ↗</a>.</li>
-                        <li>The token is already configured in <code>start.sh</code> — simply restart the server with <code>./start.sh</code>.</li>
+                        <li>Add <code>HF_TOKEN</code> to your local <code>.env.local</code> or gitignored <code>start.local.sh</code>, then restart with the launcher you normally use (for example <code>./start.local.sh</code>).</li>
                         <li>The first run downloads the model (~1 GB, cached permanently after that).</li>
                     </ol>
                     <p class="help-note">⚠️ Speaker Identification adds roughly 20–50 % to processing time and uses additional GPU memory.</p>

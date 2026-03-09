@@ -38,9 +38,11 @@ const copyFormattedBtn = document.getElementById('copyFormattedBtn');
 const downloadFormattedBtn = document.getElementById('downloadFormattedBtn');
 
 // ── Help modal ────────────────────────────────────────────────
+const appShell = document.getElementById('appShell');
 const helpBtn        = document.getElementById('helpBtn');
 const helpModal      = document.getElementById('helpModal');
 const helpModalClose = document.getElementById('helpModalClose');
+const helpModalDialog = helpModal.querySelector('.modal-dialog');
 
 // ── Tab 2: Reformat ───────────────────────────────────────────
 const reformatUploadArea = document.getElementById('reformatUploadArea');
@@ -70,6 +72,10 @@ let inlineReformatResult = null;  // result from inline reformat (tab-1)
 // Constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg', 'audio/webm', 'video/mp4'];
+const HELP_MODAL_FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const DEFAULT_REFORMAT_BUTTON_HTML = reformatFromResultBtn.innerHTML.trim();
+
+let lastFocusedElement = null;
 
 // ── Initialize ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -83,18 +89,91 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── Help modal ────────────────────────────────────────────────
 function setupHelpModal() {
-    helpBtn.addEventListener('click', () => helpModal.classList.add('open'));
-    helpModalClose.addEventListener('click', () => helpModal.classList.remove('open'));
+    helpBtn.addEventListener('click', openHelpModal);
+    helpModalClose.addEventListener('click', closeHelpModal);
+
     // Close when clicking the dark overlay (outside the dialog)
     helpModal.addEventListener('click', (e) => {
-        if (e.target === helpModal) helpModal.classList.remove('open');
+        if (e.target === helpModal) closeHelpModal();
     });
-    // Close on Escape key
+
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && helpModal.classList.contains('open')) {
-            helpModal.classList.remove('open');
+        if (!helpModal.classList.contains('open')) return;
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeHelpModal();
+            return;
+        }
+
+        if (e.key === 'Tab') {
+            trapHelpModalFocus(e);
         }
     });
+}
+
+function openHelpModal() {
+    lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    helpModal.classList.add('open');
+    helpModal.setAttribute('aria-hidden', 'false');
+
+    if (appShell) {
+        appShell.setAttribute('aria-hidden', 'true');
+        appShell.setAttribute('inert', '');
+    }
+
+    const focusable = getHelpModalFocusableElements();
+    (focusable[0] || helpModalDialog || helpModal).focus();
+}
+
+function closeHelpModal() {
+    helpModal.classList.remove('open');
+    helpModal.setAttribute('aria-hidden', 'true');
+
+    if (appShell) {
+        appShell.removeAttribute('aria-hidden');
+        appShell.removeAttribute('inert');
+    }
+
+    if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+        lastFocusedElement.focus();
+    }
+}
+
+function getHelpModalFocusableElements() {
+    return Array.from(helpModal.querySelectorAll(HELP_MODAL_FOCUSABLE)).filter((element) => (
+        element instanceof HTMLElement && !element.hasAttribute('aria-hidden')
+    ));
+}
+
+function trapHelpModalFocus(event) {
+    const focusable = getHelpModalFocusableElements();
+    if (!focusable.length) {
+        event.preventDefault();
+        helpModal.focus();
+        return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (!helpModal.contains(active)) {
+        event.preventDefault();
+        first.focus();
+        return;
+    }
+
+    if (event.shiftKey && (active === first || active === helpModal)) {
+        event.preventDefault();
+        last.focus();
+        return;
+    }
+
+    if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+    }
 }
 
 // Fetch device info from server
@@ -256,6 +335,7 @@ function resetUpload() {
     selectedFile = null;
     transcriptionResult = null;
     fileInput.value = '';
+    resetInlineReformatState();
 
     uploadArea.style.display = 'block';
     fileSelected.style.display = 'none';
@@ -263,6 +343,16 @@ function resetUpload() {
     resultSection.style.display = 'none';
     errorSection.style.display = 'none';
     uploadSection.style.display = 'block';
+}
+
+function resetInlineReformatState() {
+    inlineReformatResult = null;
+    reformatInlineText.textContent = '';
+    reformatInline.style.display = 'none';
+    reformatInlineProgress.style.display = 'none';
+    reformatInlineResult.style.display = 'none';
+    reformatFromResultBtn.disabled = false;
+    reformatFromResultBtn.innerHTML = DEFAULT_REFORMAT_BUTTON_HTML;
 }
 
 // Transcription
@@ -473,9 +563,7 @@ async function startInlineReformat() {
         return;
     }
 
-    // Reset prior inline result
-    inlineReformatResult = null;
-    reformatInlineResult.style.display = 'none';
+    resetInlineReformatState();
     reformatInlineProgress.style.display = 'flex';
     reformatInline.style.display = 'block';
     reformatFromResultBtn.disabled = true;
@@ -492,14 +580,7 @@ async function startInlineReformat() {
         reformatInlineResult.style.display = 'block';
         reformatFromResultBtn.textContent = '✓ Reformatted';
     } catch (error) {
-        reformatInlineProgress.style.display = 'none';
-        reformatInline.style.display = 'none';
-        reformatFromResultBtn.disabled = false;
-        reformatFromResultBtn.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
-            </svg>
-            Reformat with AI`;
+        resetInlineReformatState();
         showToast(error.message || 'Reformat failed', 'error');
     }
 }
