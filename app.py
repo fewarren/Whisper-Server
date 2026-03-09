@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 from tempfile import NamedTemporaryFile
+import threading
 import whisper
 import torch
 import os
@@ -16,6 +17,8 @@ print("Model loaded successfully!")
 # WhisperX models — lazy-loaded on first diarization request
 _whisperx_model = None        # faster-whisper transcription model
 _diarization_pipeline = None  # pyannote diarization pipeline
+_whisperx_lock = threading.Lock()
+_diarization_lock = threading.Lock()
 
 # Hugging Face token required for pyannote speaker diarization
 # Set via:  export HF_TOKEN="hf_..."
@@ -23,28 +26,47 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 
 def _load_whisperx_model():
-    """Lazy-load the WhisperX transcription model (faster-whisper)."""
+    """
+    Return the singleton WhisperX transcription model, loading it on first use in a thread-safe manner.
+    
+    This will import and initialize the WhisperX model (model name "base") the first time it is called; subsequent calls return the cached instance. Initialization is protected by an internal lock to avoid concurrent loads.
+    
+    Returns:
+        whisperx.Model: The loaded WhisperX model instance.
+    """
     global _whisperx_model
     if _whisperx_model is None:
-        import whisperx
-        print("Loading WhisperX model...")
-        _whisperx_model = whisperx.load_model("base", DEVICE, compute_type=COMPUTE_TYPE)
-        print("WhisperX model loaded.")
+        with _whisperx_lock:
+            if _whisperx_model is None:
+                import whisperx
+                print("Loading WhisperX model...")
+                _whisperx_model = whisperx.load_model("base", DEVICE, compute_type=COMPUTE_TYPE)
+                print("WhisperX model loaded.")
     return _whisperx_model
 
 
 def _load_diarization_pipeline(hf_token: str):
-    """Lazy-load the pyannote diarization pipeline."""
+    """
+    Provide the pyannote diarization pipeline, loading it on first use.
+    
+    Parameters:
+        hf_token (str): Hugging Face access token used to authenticate and download the diarization model.
+    
+    Returns:
+        DiarizationPipeline: An initialized pyannote diarization pipeline instance. The pipeline is lazily created and safe to request concurrently.
+    """
     global _diarization_pipeline
     if _diarization_pipeline is None:
-        from whisperx.diarize import DiarizationPipeline
-        print("Loading diarization pipeline (pyannote/speaker-diarization-community-1)...")
-        _diarization_pipeline = DiarizationPipeline(
-            model_name="pyannote/speaker-diarization-community-1",
-            token=hf_token,
-            device=DEVICE,
-        )
-        print("Diarization pipeline loaded.")
+        with _diarization_lock:
+            if _diarization_pipeline is None:
+                from whisperx.diarize import DiarizationPipeline
+                print("Loading diarization pipeline (pyannote/speaker-diarization-community-1)...")
+                _diarization_pipeline = DiarizationPipeline(
+                    model_name="pyannote/speaker-diarization-community-1",
+                    token=hf_token,
+                    device=DEVICE,
+                )
+                print("Diarization pipeline loaded.")
     return _diarization_pipeline
 
 # Initialize Flask app
@@ -207,7 +229,20 @@ def _format_diarized_segments(segments) -> str:
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
-    """Handle media file transcription, with optional speaker diarization."""
+    """
+    Transcribe an uploaded audio/video file and optionally perform speaker diarization.
+    
+    Validates an uploaded file sent in the multipart form field "file" (non-empty filename and one of: .wav, .mp3, .m4a, .flac, .ogg, .webm, .mp4). Reads the optional form field "diarize" (truthy when set to "true") and, if diarization is requested, requires a configured Hugging Face token (HF_TOKEN). The uploaded file is saved to a temporary path for processing and is removed on completion or error.
+    
+    Returns:
+        On success (200): a JSON object with:
+            - text (str): The transcript (for diarized output, speaker-labeled formatted text).
+            - language (str): Detected language code or "unknown".
+            - diarized (bool): `true` when speaker diarization was applied, `false` otherwise.
+        On client error (400): JSON {"error": "<message>"} for missing file, empty filename, or unsupported format.
+        If diarization requested but HF_TOKEN is not set (503): JSON {"error": "<message>"} explaining the missing token and where to obtain/accept the model license.
+        On server error (500): JSON {"error": "Transcription failed"}.
+    """
     # Validate file upload
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
@@ -236,70 +271,74 @@ def transcribe():
             )
         }), 503
 
+    tmp_path = None
     try:
         with NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
             tmp_path = tmp.name
-            f.save(tmp_path)
 
-        try:
-            if diarize:
-                # ── WhisperX path: transcribe + align + diarize ──────────
-                import whisperx
+        f.save(tmp_path)
 
-                print(f"WhisperX transcribing: {f.filename}")
-                wx_model = _load_whisperx_model()
-                audio = whisperx.load_audio(tmp_path)
-                wx_result = wx_model.transcribe(audio, batch_size=8)
-                language = wx_result.get("language", "unknown")
-                print(f"WhisperX transcription done. Language: {language}")
+        if diarize:
+            # ── WhisperX path: transcribe + align + diarize ──────────
+            import whisperx
 
-                # Align word-level timestamps
-                print("Aligning word timestamps...")
-                align_model, metadata = whisperx.load_align_model(
-                    language_code=language, device=DEVICE
-                )
-                wx_result = whisperx.align(
-                    wx_result["segments"], align_model, metadata, audio, DEVICE,
-                    return_char_alignments=False
-                )
+            print(f"WhisperX transcribing: {f.filename}")
+            wx_model = _load_whisperx_model()
+            audio = whisperx.load_audio(tmp_path)
+            wx_result = wx_model.transcribe(audio, batch_size=8)
+            language = wx_result.get("language", "unknown")
+            print(f"WhisperX transcription done. Language: {language}")
 
-                # Diarize (who spoke when)
-                print("Running speaker diarization...")
-                diarize_pipeline = _load_diarization_pipeline(HF_TOKEN)
-                diarize_segments = diarize_pipeline(audio)
+            # Align word-level timestamps
+            print("Aligning word timestamps...")
+            align_model, metadata = whisperx.load_align_model(
+                language_code=language, device=DEVICE
+            )
+            wx_result = whisperx.align(
+                wx_result["segments"], align_model, metadata, audio, DEVICE,
+                return_char_alignments=False
+            )
 
-                # Assign speaker labels to words/segments
-                wx_result = whisperx.assign_word_speakers(diarize_segments, wx_result)
-                print("Diarization complete.")
+            # Diarize (who spoke when)
+            print("Running speaker diarization...")
+            diarize_pipeline = _load_diarization_pipeline(HF_TOKEN)
+            diarize_segments = diarize_pipeline(audio)
 
-                text = _format_diarized_segments(wx_result["segments"])
-                return jsonify({
-                    "text": text,
-                    "language": language,
-                    "diarized": True,
-                })
+            # Assign speaker labels to words/segments
+            wx_result = whisperx.assign_word_speakers(diarize_segments, wx_result)
+            print("Diarization complete.")
 
-            else:
-                # ── Standard Whisper path (unchanged) ───────────────────
-                print(f"Transcribing file: {f.filename}")
-                result = model.transcribe(tmp_path)
-                print(f"Transcription complete. Language: {result.get('language')}")
-                return jsonify({
-                    "text": result.get("text", "").strip(),
-                    "language": result.get("language", "unknown"),
-                    "diarized": False,
-                })
+            text = _format_diarized_segments(wx_result["segments"])
+            return jsonify({
+                "text": text,
+                "language": language,
+                "diarized": True,
+            })
 
-        finally:
+        # ── Standard Whisper path (unchanged) ───────────────────
+        print(f"Transcribing file: {f.filename}")
+        result = model.transcribe(tmp_path)
+        print(f"Transcription complete. Language: {result.get('language')}")
+        return jsonify({
+            "text": result.get("text", "").strip(),
+            "language": result.get("language", "unknown"),
+            "diarized": False,
+        })
+
+    except Exception:
+        app.logger.exception("Transcription failed")
+        return jsonify({"error": "Transcription failed"}), 500
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
-
-    except Exception as e:
-        print(f"Transcription error: {str(e)}")
-        return jsonify({"error": f"Transcription failed: {str(e)}"}), 500
 
 @app.route("/reformat", methods=["POST"])
 def reformat():
-    """Reformat transcript text using local LLM via Ollama"""
+    """
+    Reformat a transcript string using the local Ollama LLM and return the reformatted text.
+    
+    Expects a JSON body with a "text" field containing the transcript to reformat. Enforces a 500,000-character limit and returns HTTP 400 for missing, empty, or too-large input. On success returns JSON with a "formatted_text" field containing the reformatted transcript. If the Ollama service is unreachable returns HTTP 503; if the LLM request times out returns HTTP 504; other failures return HTTP 500.
+    """
     data = request.get_json()
     if not data or "text" not in data:
         return jsonify({"error": "No text provided"}), 400
@@ -323,9 +362,9 @@ def reformat():
         return jsonify({"error": "Cannot connect to Ollama. Please ensure Ollama is running (run: ollama serve)."}), 503
     except http_requests.exceptions.Timeout:
         return jsonify({"error": "LLM processing timed out. Try with a shorter text."}), 504
-    except Exception as e:
-        print(f"Reformat error: {str(e)}")
-        return jsonify({"error": f"Reformat failed: {str(e)}"}), 500
+    except Exception:
+        app.logger.exception("Reformat failed")
+        return jsonify({"error": "Reformat failed"}), 500
 
 
 @app.errorhandler(413)
