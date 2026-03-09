@@ -1,4 +1,4 @@
-// DOM Elements
+// ── Tab 1: Transcribe ──────────────────────────────────────────
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
 const uploadSection = document.getElementById('uploadSection');
@@ -8,6 +8,9 @@ const fileSize = document.getElementById('fileSize');
 const removeFile = document.getElementById('removeFile');
 const transcribeBtn = document.getElementById('transcribeBtn');
 const progressSection = document.getElementById('progressSection');
+const progressTitle = document.getElementById('progressTitle');
+const progressMessage = document.getElementById('progressMessage');
+const progressNote = document.getElementById('progressNote');
 const resultSection = document.getElementById('resultSection');
 const errorSection = document.getElementById('errorSection');
 const resultText = document.getElementById('resultText');
@@ -20,19 +23,79 @@ const errorMessage = document.getElementById('errorMessage');
 const toast = document.getElementById('toast');
 const deviceInfo = document.getElementById('deviceInfo');
 
-// State
+// Diarization toggle
+const diarizeToggle = document.getElementById('diarizeToggle');
+const diarizeUnavailable = document.getElementById('diarizeUnavailable');
+const diarizeSubtitle = document.getElementById('diarizeSubtitle');
+
+// Inline reformat (from transcription result)
+const reformatFromResultBtn = document.getElementById('reformatFromResultBtn');
+const reformatInline = document.getElementById('reformatInline');
+const reformatInlineProgress = document.getElementById('reformatInlineProgress');
+const reformatInlineResult = document.getElementById('reformatInlineResult');
+const reformatInlineText = document.getElementById('reformatInlineText');
+const copyFormattedBtn = document.getElementById('copyFormattedBtn');
+const downloadFormattedBtn = document.getElementById('downloadFormattedBtn');
+
+// ── Help modal ────────────────────────────────────────────────
+const helpBtn        = document.getElementById('helpBtn');
+const helpModal      = document.getElementById('helpModal');
+const helpModalClose = document.getElementById('helpModalClose');
+
+// ── Tab 2: Reformat ───────────────────────────────────────────
+const reformatUploadArea = document.getElementById('reformatUploadArea');
+const reformatFileInput = document.getElementById('reformatFileInput');
+const reformatTextarea = document.getElementById('reformatTextarea');
+const reformatFileInfo = document.getElementById('reformatFileInfo');
+const reformatFileName = document.getElementById('reformatFileName');
+const clearReformatFile = document.getElementById('clearReformatFile');
+const reformatSubmitBtn = document.getElementById('reformatSubmitBtn');
+const reformatProgressSection = document.getElementById('reformatProgressSection');
+const reformatResultSection = document.getElementById('reformatResultSection');
+const reformatResultText = document.getElementById('reformatResultText');
+const copyReformatBtn = document.getElementById('copyReformatBtn');
+const downloadReformatBtn = document.getElementById('downloadReformatBtn');
+const newReformatBtn = document.getElementById('newReformatBtn');
+const reformatErrorSection = document.getElementById('reformatErrorSection');
+const reformatErrorMessage = document.getElementById('reformatErrorMessage');
+const reformatRetryBtn = document.getElementById('reformatRetryBtn');
+
+// ── State ─────────────────────────────────────────────────────
 let selectedFile = null;
+let selectedReformatFile = null;  // file loaded in tab-2
 let transcriptionResult = null;
+let reformatResult = null;        // result from tab-2 reformat
+let inlineReformatResult = null;  // result from inline reformat (tab-1)
 
 // Constants
-const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB
-const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg', 'audio/webm'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
+const ALLOWED_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg', 'audio/webm', 'video/mp4'];
 
-// Initialize
+// ── Initialize ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     fetchDeviceInfo();
+    fetchDiarizationStatus();
     setupEventListeners();
+    setupTabListeners();
+    setupReformatListeners();
+    setupHelpModal();
 });
+
+// ── Help modal ────────────────────────────────────────────────
+function setupHelpModal() {
+    helpBtn.addEventListener('click', () => helpModal.classList.add('open'));
+    helpModalClose.addEventListener('click', () => helpModal.classList.remove('open'));
+    // Close when clicking the dark overlay (outside the dialog)
+    helpModal.addEventListener('click', (e) => {
+        if (e.target === helpModal) helpModal.classList.remove('open');
+    });
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && helpModal.classList.contains('open')) {
+            helpModal.classList.remove('open');
+        }
+    });
+}
 
 // Fetch device info from server
 async function fetchDeviceInfo() {
@@ -45,36 +108,87 @@ async function fetchDeviceInfo() {
     }
 }
 
-// Event Listeners
+// Fetch diarization availability
+async function fetchDiarizationStatus() {
+    try {
+        const response = await fetch('/api/diarization-status');
+        const data = await response.json();
+        if (data.available) {
+            diarizeToggle.disabled = false;
+            diarizeSubtitle.textContent = 'Identify who is speaking using voice analysis';
+            diarizeUnavailable.style.display = 'none';
+        } else {
+            diarizeToggle.disabled = true;
+            diarizeSubtitle.textContent = 'Unavailable — HF_TOKEN not configured';
+            diarizeUnavailable.style.display = 'flex';
+        }
+    } catch (error) {
+        console.error('Failed to fetch diarization status:', error);
+        diarizeToggle.disabled = true;
+    }
+}
+
+// ── Tab switching ─────────────────────────────────────────────
+function setupTabListeners() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const target = btn.dataset.tab;
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
+            btn.classList.add('active');
+            btn.setAttribute('aria-selected', 'true');
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            document.getElementById(`tab-${target}`).style.display = 'block';
+        });
+    });
+}
+
+// ── Tab 1 event listeners ─────────────────────────────────────
 function setupEventListeners() {
-    // Upload area click
     uploadArea.addEventListener('click', () => fileInput.click());
-    
-    // File input change
     fileInput.addEventListener('change', handleFileSelect);
-    
-    // Drag and drop
     uploadArea.addEventListener('dragover', handleDragOver);
     uploadArea.addEventListener('dragleave', handleDragLeave);
     uploadArea.addEventListener('drop', handleDrop);
-    
-    // Remove file
     removeFile.addEventListener('click', resetUpload);
-    
-    // Transcribe button
     transcribeBtn.addEventListener('click', startTranscription);
-    
-    // Copy button
     copyBtn.addEventListener('click', copyToClipboard);
-    
-    // Download button
     downloadBtn.addEventListener('click', downloadTranscription);
-    
-    // New transcription button
     newTranscriptionBtn.addEventListener('click', resetUpload);
-    
-    // Retry button
     retryBtn.addEventListener('click', resetUpload);
+
+    // Inline reformat (from transcription result)
+    reformatFromResultBtn.addEventListener('click', startInlineReformat);
+    copyFormattedBtn.addEventListener('click', () => copyText(inlineReformatResult, 'Formatted text copied!'));
+    downloadFormattedBtn.addEventListener('click', () => {
+        downloadText(inlineReformatResult, makeFormattedFilename(selectedFile));
+    });
+}
+
+// ── Tab 2 event listeners ─────────────────────────────────────
+function setupReformatListeners() {
+    reformatUploadArea.addEventListener('click', () => reformatFileInput.click());
+    reformatUploadArea.addEventListener('dragover', e => { e.preventDefault(); reformatUploadArea.classList.add('drag-over'); });
+    reformatUploadArea.addEventListener('dragleave', e => { e.preventDefault(); reformatUploadArea.classList.remove('drag-over'); });
+    reformatUploadArea.addEventListener('drop', e => {
+        e.preventDefault();
+        reformatUploadArea.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) loadReformatFile(file);
+    });
+    reformatFileInput.addEventListener('change', e => {
+        if (e.target.files[0]) loadReformatFile(e.target.files[0]);
+    });
+    clearReformatFile.addEventListener('click', clearReformatFileHandler);
+    reformatSubmitBtn.addEventListener('click', startReformat);
+    copyReformatBtn.addEventListener('click', () => copyText(reformatResult, 'Formatted text copied!'));
+    downloadReformatBtn.addEventListener('click', () => {
+        downloadText(reformatResult, makeFormattedFilename(selectedReformatFile));
+    });
+    newReformatBtn.addEventListener('click', resetReformat);
+    reformatRetryBtn.addEventListener('click', resetReformat);
 }
 
 // File handling
@@ -107,14 +221,14 @@ function handleDrop(e) {
 
 function validateAndSetFile(file) {
     // Check file type
-    if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(wav|mp3|m4a|flac|ogg|webm)$/i)) {
-        showToast('Please select a valid audio file', 'error');
+    if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(wav|mp3|m4a|flac|ogg|webm|mp4)$/i)) {
+        showToast('Please select a valid audio or MP4 video file', 'error');
         return;
     }
     
     // Check file size
     if (file.size > MAX_FILE_SIZE) {
-        showToast('File size must be less than 1GB', 'error');
+        showToast('File size must be less than 10 GB', 'error');
         return;
     }
     
@@ -158,17 +272,29 @@ async function startTranscription() {
         return;
     }
 
-    // Show progress
+    const diarize = diarizeToggle && diarizeToggle.checked && !diarizeToggle.disabled;
+
+    // Show progress with appropriate messages
     uploadSection.style.display = 'none';
     progressSection.style.display = 'block';
+    if (diarize) {
+        progressTitle.textContent = 'Transcribing & identifying speakers...';
+        progressMessage.textContent = 'WhisperX is transcribing, aligning, and diarizing the extracted audio.';
+        progressNote.textContent = 'Speaker identification adds extra processing time. A 1-hour file may take 45-75 minutes.';
+    } else {
+        progressTitle.textContent = 'Transcribing your file...';
+        progressMessage.textContent = 'This may take a few moments depending on the file size';
+        progressNote.textContent = 'Large files (1+ hour) may take 30-60 minutes to process. Please be patient.';
+    }
 
     const formData = new FormData();
     formData.append('file', selectedFile);
+    if (diarize) formData.append('diarize', 'true');
 
     try {
-        // Create abort controller for timeout
+        // 2 hour timeout for large files (diarization can take longer)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+        const timeoutId = setTimeout(() => controller.abort(), 7200000);
 
         const response = await fetch('/transcribe', {
             method: 'POST',
@@ -195,7 +321,7 @@ async function startTranscription() {
         progressSection.style.display = 'none';
 
         if (error.name === 'AbortError') {
-            showError('Transcription timed out. The file may be too large or complex. Please try a shorter audio file.');
+            showError('Transcription timed out. The file may be too large or complex. Please try a shorter file.');
         } else {
             showError(error.message || 'An unexpected error occurred. Please try again.');
         }
@@ -204,7 +330,8 @@ async function startTranscription() {
 
 function displayResult(data) {
     resultText.textContent = data.text || 'No transcription available';
-    languageBadge.textContent = data.language ? getLanguageName(data.language) : 'Unknown';
+    const langName = data.language ? getLanguageName(data.language) : 'Unknown';
+    languageBadge.textContent = data.diarized ? `${langName} · 🎤 Diarized` : langName;
     resultSection.style.display = 'block';
 }
 
@@ -258,50 +385,184 @@ function getLanguageName(code) {
     return languages[code] || code.toUpperCase();
 }
 
-// Copy to clipboard
-async function copyToClipboard() {
-    if (!transcriptionResult || !transcriptionResult.text) {
-        showToast('No text to copy', 'error');
-        return;
-    }
-
-    try {
-        await navigator.clipboard.writeText(transcriptionResult.text);
-        showToast('Text copied to clipboard!', 'success');
-    } catch (error) {
-        console.error('Failed to copy:', error);
-        showToast('Failed to copy text', 'error');
-    }
+// Copy to clipboard (transcription)
+function copyToClipboard() {
+    copyText(transcriptionResult && transcriptionResult.text, 'Text copied to clipboard!');
 }
 
 // Download transcription
 function downloadTranscription() {
-    if (!transcriptionResult || !transcriptionResult.text) {
-        showToast('No text to download', 'error');
-        return;
-    }
-
-    const blob = new Blob([transcriptionResult.text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `transcription_${new Date().getTime()}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    showToast('Transcription downloaded!', 'success');
+    downloadText(transcriptionResult && transcriptionResult.text, makeTranscriptFilename(selectedFile));
 }
 
-// Toast notifications
+// ── Toast notifications ───────────────────────────────────────
 function showToast(message, type = 'success') {
     toast.textContent = message;
     toast.className = `toast ${type}`;
     toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+}
 
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 3000);
+// ── Shared helpers ────────────────────────────────────────────
+function copyText(text, successMsg) {
+    if (!text) { showToast('No text to copy', 'error'); return; }
+    navigator.clipboard.writeText(text)
+        .then(() => showToast(successMsg || 'Copied!', 'success'))
+        .catch(() => showToast('Failed to copy text', 'error'));
+}
+
+// Return the base name of a File (strips extension)
+function baseNameOf(file) {
+    if (!file) return null;
+    return file.name.replace(/\.[^.]+$/, '');
+}
+
+function sanitizeDownloadBaseName(name, fallback = 'transcript') {
+    const cleaned = String(name || '')
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, '_')
+        .replace(/\s+/g, '_')
+        .replace(/_formatted$/i, '');
+
+    return cleaned || fallback;
+}
+
+function makeTranscriptFilename(file) {
+    const fallback = `transcription_${Date.now()}`;
+    return `${sanitizeDownloadBaseName(baseNameOf(file), fallback)}.txt`;
+}
+
+function makeFormattedFilename(file) {
+    return `${sanitizeDownloadBaseName(baseNameOf(file))}_formatted.txt`;
+}
+
+function downloadText(text, filename) {
+    if (!text) { showToast('No text to download', 'error'); return; }
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || `transcript_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded ${a.download}`, 'success');
+}
+
+// Central reformat API call
+async function callReformat(text) {
+    const response = await fetch('/reformat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(660000)  // 11 minutes
+    });
+    if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Reformat failed');
+    }
+    const data = await response.json();
+    return data.formatted_text;
+}
+
+// ── Inline reformat (Tab 1, after transcription) ──────────────
+async function startInlineReformat() {
+    if (!transcriptionResult || !transcriptionResult.text) {
+        showToast('No transcription to reformat', 'error');
+        return;
+    }
+
+    // Reset prior inline result
+    inlineReformatResult = null;
+    reformatInlineResult.style.display = 'none';
+    reformatInlineProgress.style.display = 'flex';
+    reformatInline.style.display = 'block';
+    reformatFromResultBtn.disabled = true;
+    reformatFromResultBtn.textContent = 'Reformatting…';
+
+    // Scroll to the progress indicator
+    reformatInline.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    try {
+        const formatted = await callReformat(transcriptionResult.text);
+        inlineReformatResult = formatted;
+        reformatInlineText.textContent = formatted;
+        reformatInlineProgress.style.display = 'none';
+        reformatInlineResult.style.display = 'block';
+        reformatFromResultBtn.textContent = '✓ Reformatted';
+    } catch (error) {
+        reformatInlineProgress.style.display = 'none';
+        reformatInline.style.display = 'none';
+        reformatFromResultBtn.disabled = false;
+        reformatFromResultBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" />
+            </svg>
+            Reformat with AI`;
+        showToast(error.message || 'Reformat failed', 'error');
+    }
+}
+
+// ── Tab 2: Reformat file / text ───────────────────────────────
+function loadReformatFile(file) {
+    if (!file.name.match(/\.txt$/i) && file.type !== 'text/plain') {
+        showToast('Please select a .txt file', 'error');
+        return;
+    }
+    selectedReformatFile = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+        reformatTextarea.value = e.target.result;
+        reformatFileName.textContent = `${file.name} (${formatFileSize(file.size)})`;
+        reformatFileInfo.style.display = 'flex';
+    };
+    reader.onerror = () => showToast('Failed to read file', 'error');
+    reader.readAsText(file);
+}
+
+function clearReformatFileHandler() {
+    selectedReformatFile = null;
+    reformatFileInput.value = '';
+    reformatTextarea.value = '';
+    reformatFileInfo.style.display = 'none';
+}
+
+async function startReformat() {
+    const text = reformatTextarea.value.trim();
+    if (!text) {
+        showToast('Please paste or upload text first', 'error');
+        return;
+    }
+
+    // Show progress
+    document.getElementById('reformatSection').style.display = 'none';
+    reformatProgressSection.style.display = 'block';
+    reformatErrorSection.style.display = 'none';
+    reformatResultSection.style.display = 'none';
+
+    try {
+        const formatted = await callReformat(text);
+        reformatResult = formatted;
+        reformatResultText.textContent = formatted;
+        reformatProgressSection.style.display = 'none';
+        reformatResultSection.style.display = 'block';
+    } catch (error) {
+        reformatProgressSection.style.display = 'none';
+        reformatErrorMessage.textContent = error.message || 'An unexpected error occurred.';
+        reformatErrorSection.style.display = 'block';
+    }
+}
+
+function resetReformat() {
+    reformatResult = null;
+    selectedReformatFile = null;
+    reformatTextarea.value = '';
+    reformatFileInput.value = '';
+    reformatFileInfo.style.display = 'none';
+    reformatProgressSection.style.display = 'none';
+    reformatResultSection.style.display = 'none';
+    reformatErrorSection.style.display = 'none';
+    document.getElementById('reformatSection').style.display = 'block';
 }
 
