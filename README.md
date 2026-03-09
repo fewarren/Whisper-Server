@@ -248,10 +248,13 @@ Transcribes an uploaded audio file or MP4 video file.
 ### `POST /reformat`
 Reformats plain text using the local LLM.
 
-**Request** — `multipart/form-data`:
-| Field | Type | Description |
-|---|---|---|
-| `text` | string | Raw transcript text to reformat |
+**Request** — `application/json`
+
+Set `Content-Type: application/json` and send:
+
+```json
+{ "text": "Raw transcript text to reformat" }
+```
 
 **Response:**
 ```json
